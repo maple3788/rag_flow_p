@@ -1,0 +1,59 @@
+name: Backend CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rag_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rag_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/rag_db
+      OLLAMA_BASE_URL: http://localhost:11434
+      EMBEDDING_MODEL: nomic-embed-text:latest
+      CHAT_MODEL: qwen3:8b
+      EMBEDDING_DIMENSION: "768"
+      TOP_K: "5"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Syntax check
+        working-directory: backend
+        run: python -m compileall app
+
+      - name: API startup smoke test
+        working-directory: backend
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          UVICORN_PID=$!
+          trap "kill $UVICORN_PID" EXIT
+          sleep 5
+          curl --fail http://127.0.0.1:8000/api/health
