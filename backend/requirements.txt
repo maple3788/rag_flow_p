@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy
+psycopg[binary]
+pgvector
+python-dotenv
+requests
+langchain-text-splitters
+PyMuPDF
+python-docx
