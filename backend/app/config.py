@@ -15,6 +15,7 @@ class Settings:
     )
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text:latest")
     chat_model: str = os.getenv("CHAT_MODEL", "qwen3:8b")
+    chat_model_options: tuple[str, ...] = ("qwen3:8b", "llama3.2:latest")
     top_k: int = int(os.getenv("TOP_K", "5"))
     embedding_dimension: int = int(os.getenv("EMBEDDING_DIMENSION", "768"))
 

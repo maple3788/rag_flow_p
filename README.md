@@ -7,6 +7,7 @@ Minimal Retrieval-Augmented Generation stack with:
 - Similarity retrieval (`top-k`)
 - Chat API and frontend chat UI with source citations
 - Visual workflow builder (React Flow + DAG execution API)
+- RAG evaluation engine (LLM-as-a-judge)
 
 ## Project Structure
 
@@ -48,7 +49,7 @@ Set:
 - `OLLAMA_BASE_URL` (defaults to `http://localhost:11434`)
 - `DATABASE_URL` (default already points to local docker)
 - `EMBEDDING_MODEL` (default `nomic-embed-text:latest`)
-- `CHAT_MODEL` (default `qwen3:8b`)
+- `CHAT_MODEL` (default `qwen3:8b`, alternate `llama3.2:latest`)
 - `EMBEDDING_DIMENSION` (default `768`)
 
 Pull local Ollama models:
@@ -56,6 +57,7 @@ Pull local Ollama models:
 ```bash
 ollama pull nomic-embed-text:latest
 ollama pull qwen3:8b
+ollama pull llama3.2:latest
 ```
 
 ### 4) Run API server
@@ -67,7 +69,11 @@ uvicorn app.main:app --reload --port 8000
 Backend endpoints:
 - `GET /api/health`
 - `POST /api/upload` (multipart `file`)
-- `POST /api/chat` (`{"query":"...", "k":5}`)
+- `POST /api/chat` (`{"query":"...", "k":5, "conversation_id":"optional"}`)
+- `POST /api/chat/stream` (NDJSON token stream + final payload, includes `conversation_id`)
+- `POST /api/evaluate` (`{"query":"...", "answer":"...", "contexts":[...], "conversation_id":"optional"}`)
+- `GET /api/evaluations?limit=20&conversation_id=...`
+- `GET /api/evaluations/summary?limit=200&conversation_id=...`
 - `POST /api/workflow/run` (`{"nodes":[...], "edges":[...]}`)
 
 ## Frontend Setup (Next.js)
@@ -110,6 +116,13 @@ Workflow builder UI:
 - `content` (text)
 - `embedding` (`vector(768)` by default, configurable)
 - `metadata` (`json`)
+
+### `evaluations`
+- `id` (PK)
+- `query` (text)
+- `answer` (text)
+- `scores` (json: faithfulness/relevance/context_precision/rationale)
+- `created_at` (timestamp)
 
 ## RAG Flow
 

@@ -80,7 +80,13 @@ class LLMNode(BaseWorkflowNode):
             )
 
         enriched_query = f"{template}\n\nQuestion: {query}"
-        answer = generate_answer(query=enriched_query, sources=context.last_sources)
+        model = self.node.data.get("model")
+        model_name = str(model) if model else None
+        answer = generate_answer(
+            query=enriched_query,
+            sources=context.last_sources,
+            model=model_name,
+        )
         return {
             "text": answer,
             "sources": [source.model_dump() for source in context.last_sources],

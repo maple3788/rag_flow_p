@@ -19,11 +19,22 @@ class SourceChunk(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     k: int | None = None
+    model: str | None = None
+    conversation_id: str | None = None
+
+
+class EvaluationScores(BaseModel):
+    faithfulness: float
+    relevance: float
+    context_precision: float
+    rationale: str | None = None
 
 
 class ChatResponse(BaseModel):
+    conversation_id: str
     answer: str
     sources: list[SourceChunk]
+    evaluation: EvaluationScores | None = None
 
 
 class WorkflowNode(BaseModel):
@@ -47,3 +58,32 @@ class WorkflowRunRequest(BaseModel):
 class WorkflowRunResponse(BaseModel):
     output: str
     node_outputs: dict[str, dict]
+
+
+class EvaluateRequest(BaseModel):
+    query: str
+    answer: str
+    contexts: list[str]
+    model: str | None = None
+    conversation_id: str | None = None
+
+
+class EvaluateResponse(BaseModel):
+    scores: EvaluationScores
+
+
+class EvaluationHistoryItem(BaseModel):
+    id: int
+    conversation_id: str
+    query: str
+    answer: str
+    scores: EvaluationScores
+    created_at: str
+
+
+class EvaluationSummaryPoint(BaseModel):
+    period: str
+    faithfulness: float
+    relevance: float
+    context_precision: float
+    count: int
