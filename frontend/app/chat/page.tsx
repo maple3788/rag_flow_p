@@ -119,7 +119,7 @@ export default function ChatPage() {
     try {
       await streamChat(
         trimmed,
-        5,
+        undefined,
         model,
         conversationId,
         {

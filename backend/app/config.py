@@ -22,6 +22,14 @@ class Settings:
     elasticsearch_username: str | None = os.getenv("ELASTICSEARCH_USERNAME")
     elasticsearch_password: str | None = os.getenv("ELASTICSEARCH_PASSWORD")
     elasticsearch_timeout_seconds: int = int(os.getenv("ELASTICSEARCH_TIMEOUT_SECONDS", "10"))
+    faiss_index_dir: str = os.getenv("FAISS_INDEX_DIR", "backend/.faiss")
+    rrf_k: int = int(os.getenv("RRF_K", "60"))
+    reranker_strategy: str = os.getenv("RERANKER_STRATEGY", "auto")
+    cross_encoder_model: str = os.getenv(
+        "CROSS_ENCODER_MODEL",
+        "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    )
+    reranker_model: str = os.getenv("RERANKER_MODEL", "qwen3:8b")
 
 
 settings = Settings()

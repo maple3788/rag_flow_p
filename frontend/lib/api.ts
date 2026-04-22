@@ -111,7 +111,7 @@ export async function uploadFile(file: File): Promise<{
 
 export async function sendChat(
   query: string,
-  k = 5,
+  k: number | undefined = undefined,
   model: LlmModel = "qwen3:8b",
   conversationId?: string,
   options?: { enableQueryRewrite?: boolean; enableRerank?: boolean; datasetId?: number }
@@ -138,7 +138,7 @@ export async function sendChat(
 
 export async function streamChat(
   query: string,
-  k: number,
+  k: number | undefined,
   model: LlmModel,
   conversationId: string | undefined,
   options: { enableQueryRewrite?: boolean; enableRerank?: boolean; datasetId?: number },

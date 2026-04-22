@@ -33,11 +33,15 @@ export default function DatasetDetailPage() {
   const [isDeletingDataset, setIsDeletingDataset] = useState(false);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [descriptionDraft, setDescriptionDraft] = useState("");
-  const [topK, setTopK] = useState(5);
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
+  const [finalK, setFinalK] = useState(5);
+  const [topKBm25, setTopKBm25] = useState(10);
+  const [topKDense, setTopKDense] = useState(10);
+  const [fusionMethod, setFusionMethod] = useState("rrf");
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
-  const [enableRerank, setEnableRerank] = useState(false);
+  const [rerankEnabled, setRerankEnabled] = useState(true);
+  const [rerankModel, setRerankModel] = useState("cross-encoder/ms-marco-MiniLM-L-6-v2");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -54,11 +58,21 @@ export default function DatasetDetailPage() {
       ]);
       setDataset(datasetRes);
       setDescriptionDraft(datasetRes.description || "");
-      setTopK(_configNumber(datasetRes.config, "top_k", 5));
       setChunkSize(_configNumber(datasetRes.config, "chunk_size", 500));
       setChunkOverlap(_configNumber(datasetRes.config, "chunk_overlap", 50));
+      setFinalK(_configNumber(datasetRes.config, "final_k", 5));
+      setTopKBm25(_configNumber(datasetRes.config, "top_k_bm25", 10));
+      setTopKDense(_configNumber(datasetRes.config, "top_k_dense", 10));
+      setFusionMethod(_configString(datasetRes.config, "fusion_method", "rrf"));
       setEnableQueryRewrite(_configBool(datasetRes.config, "enable_query_rewrite", false));
-      setEnableRerank(_configBool(datasetRes.config, "enable_rerank", false));
+      setRerankEnabled(_configBool(datasetRes.config, "rerank_enabled", true));
+      setRerankModel(
+        _configString(
+          datasetRes.config,
+          "rerank_model",
+          "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        )
+      );
       setFiles(filesRes);
       setChunks(await listDatasetChunks(datasetId));
     } catch (err) {
@@ -99,11 +113,15 @@ export default function DatasetDetailPage() {
       const updated = await updateDataset(datasetId, {
         description: descriptionDraft,
         config: {
-          top_k: topK,
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
+          final_k: finalK,
+          top_k_bm25: topKBm25,
+          top_k_dense: topKDense,
+          fusion_method: fusionMethod,
           enable_query_rewrite: enableQueryRewrite,
-          enable_rerank: enableRerank,
+          rerank_enabled: rerankEnabled,
+          rerank_model: rerankModel,
         },
       });
       setDataset(updated);
@@ -262,14 +280,36 @@ export default function DatasetDetailPage() {
               placeholder="Dataset description"
             />
             <label className="muted">
-              Retrieval top-k
+              Final top-k (to LLM)
               <input
                 className="inspector-input"
                 type="number"
                 min={1}
                 max={50}
-                value={topK}
-                onChange={(event) => setTopK(Number(event.target.value || 5))}
+                value={finalK}
+                onChange={(event) => setFinalK(Number(event.target.value || 5))}
+              />
+            </label>
+            <label className="muted">
+              Top-k BM25
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={200}
+                value={topKBm25}
+                onChange={(event) => setTopKBm25(Number(event.target.value || 10))}
+              />
+            </label>
+            <label className="muted">
+              Top-k Dense
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={200}
+                value={topKDense}
+                onChange={(event) => setTopKDense(Number(event.target.value || 10))}
               />
             </label>
             <label className="muted">
@@ -294,6 +334,16 @@ export default function DatasetDetailPage() {
                 onChange={(event) => setChunkOverlap(Number(event.target.value || 50))}
               />
             </label>
+            <label className="muted">
+              Fusion method
+              <select
+                className="model-select"
+                value={fusionMethod}
+                onChange={(event) => setFusionMethod(event.target.value)}
+              >
+                <option value="rrf">rrf</option>
+              </select>
+            </label>
             <label className="inspector-checkbox">
               <input
                 type="checkbox"
@@ -305,10 +355,18 @@ export default function DatasetDetailPage() {
             <label className="inspector-checkbox">
               <input
                 type="checkbox"
-                checked={enableRerank}
-                onChange={(event) => setEnableRerank(event.target.checked)}
+                checked={rerankEnabled}
+                onChange={(event) => setRerankEnabled(event.target.checked)}
               />
-              Enable rerank by default
+              Enable rerank
+            </label>
+            <label className="muted">
+              Rerank model
+              <input
+                className="inspector-input"
+                value={rerankModel}
+                onChange={(event) => setRerankModel(event.target.value)}
+              />
             </label>
             <button className="button" type="submit" disabled={isSavingConfig}>
               {isSavingConfig ? "Saving..." : "Save Config"}
@@ -338,5 +396,11 @@ function _configBool(config: Record<string, unknown>, key: string, fallback: boo
     if (raw.toLowerCase() === "true") return true;
     if (raw.toLowerCase() === "false") return false;
   }
+  return fallback;
+}
+
+function _configString(config: Record<string, unknown>, key: string, fallback: string): string {
+  const raw = config[key];
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
   return fallback;
 }

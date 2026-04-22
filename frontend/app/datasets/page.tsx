@@ -9,11 +9,15 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [topK, setTopK] = useState(5);
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
+  const [finalK, setFinalK] = useState(5);
+  const [topKBm25, setTopKBm25] = useState(10);
+  const [topKDense, setTopKDense] = useState(10);
+  const [fusionMethod, setFusionMethod] = useState("rrf");
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
-  const [enableRerank, setEnableRerank] = useState(false);
+  const [rerankEnabled, setRerankEnabled] = useState(true);
+  const [rerankModel, setRerankModel] = useState("cross-encoder/ms-marco-MiniLM-L-6-v2");
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [deletingDatasetId, setDeletingDatasetId] = useState<number | null>(null);
@@ -46,20 +50,28 @@ export default function DatasetsPage() {
         name: trimmedName,
         description: description.trim(),
         config: {
-          top_k: topK,
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
+          final_k: finalK,
+          top_k_bm25: topKBm25,
+          top_k_dense: topKDense,
+          fusion_method: fusionMethod,
           enable_query_rewrite: enableQueryRewrite,
-          enable_rerank: enableRerank,
+          rerank_enabled: rerankEnabled,
+          rerank_model: rerankModel,
         },
       });
       setName("");
       setDescription("");
-      setTopK(5);
       setChunkSize(500);
       setChunkOverlap(50);
+      setFinalK(5);
+      setTopKBm25(10);
+      setTopKDense(10);
+      setFusionMethod("rrf");
       setEnableQueryRewrite(false);
-      setEnableRerank(false);
+      setRerankEnabled(true);
+      setRerankModel("cross-encoder/ms-marco-MiniLM-L-6-v2");
       await refreshDatasets();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create dataset");
@@ -104,14 +116,38 @@ export default function DatasetsPage() {
           disabled={isCreating}
         />
         <label className="muted">
-          Retrieval top-k
+          Final top-k (to LLM)
           <input
             className="inspector-input"
             type="number"
             min={1}
             max={50}
-            value={topK}
-            onChange={(event) => setTopK(Number(event.target.value || 5))}
+            value={finalK}
+            onChange={(event) => setFinalK(Number(event.target.value || 5))}
+            disabled={isCreating}
+          />
+        </label>
+        <label className="muted">
+          Top-k BM25
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={200}
+            value={topKBm25}
+            onChange={(event) => setTopKBm25(Number(event.target.value || 10))}
+            disabled={isCreating}
+          />
+        </label>
+        <label className="muted">
+          Top-k Dense
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={200}
+            value={topKDense}
+            onChange={(event) => setTopKDense(Number(event.target.value || 10))}
             disabled={isCreating}
           />
         </label>
@@ -139,6 +175,17 @@ export default function DatasetsPage() {
             disabled={isCreating}
           />
         </label>
+        <label className="muted">
+          Fusion Method
+          <select
+            className="model-select"
+            value={fusionMethod}
+            onChange={(event) => setFusionMethod(event.target.value)}
+            disabled={isCreating}
+          >
+            <option value="rrf">rrf</option>
+          </select>
+        </label>
         <label className="inspector-checkbox">
           <input
             type="checkbox"
@@ -151,11 +198,20 @@ export default function DatasetsPage() {
         <label className="inspector-checkbox">
           <input
             type="checkbox"
-            checked={enableRerank}
-            onChange={(event) => setEnableRerank(event.target.checked)}
+            checked={rerankEnabled}
+            onChange={(event) => setRerankEnabled(event.target.checked)}
             disabled={isCreating}
           />
-          Enable rerank by default
+          Enable rerank
+        </label>
+        <label className="muted">
+          Rerank model
+          <input
+            className="inspector-input"
+            value={rerankModel}
+            onChange={(event) => setRerankModel(event.target.value)}
+            disabled={isCreating}
+          />
         </label>
         <button className="button" type="submit" disabled={isCreating || !name.trim()}>
           {isCreating ? "Creating..." : "Create Dataset"}

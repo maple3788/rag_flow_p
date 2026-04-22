@@ -10,3 +10,6 @@ langgraph
 langchain-text-splitters
 PyMuPDF
 python-docx
+numpy
+faiss-cpu
+sentence-transformers

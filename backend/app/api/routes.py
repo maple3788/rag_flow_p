@@ -31,6 +31,8 @@ from app.services.bm25 import index_chunks
 from app.services.document_parser import parse_uploaded_file
 from app.services.embeddings import embed_texts
 from app.services.evaluation import evaluate_rag_output
+from app.services.faiss_index import add_embeddings
+from app.services.dataset_config import resolve_dataset_config
 from app.services.query_ops import rerank_sources, rewrite_query
 from app.services.retrieval import retrieve_similar_chunks
 from app.services.text_splitter import split_text_recursive
@@ -59,7 +61,12 @@ async def upload_document(
         )
         db.add(default_dataset)
         db.flush()
-    chunks = split_text_recursive(text=text, chunk_size=500, chunk_overlap=50)
+    dataset_config = resolve_dataset_config(default_dataset.config)
+    chunks = split_text_recursive(
+        text=text,
+        chunk_size=int(dataset_config["chunk_size"]),
+        chunk_overlap=int(dataset_config["chunk_overlap"]),
+    )
     if not chunks:
         raise HTTPException(status_code=400, detail="No text chunks were generated")
 
@@ -89,6 +96,11 @@ async def upload_document(
         )
     db.add_all(chunk_rows)
     db.flush()
+    add_embeddings(
+        dataset_id=default_dataset.id,
+        embeddings=vectors,
+        chunk_ids=[chunk.id for chunk in chunk_rows],
+    )
     index_chunks(
         dataset_id=default_dataset.id,
         items=[
@@ -118,17 +130,24 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     conversation_id = request.conversation_id or _new_conversation_id()
 
     retrieval_query = request.query
-    if request.enable_query_rewrite:
+    dataset_config = _get_dataset_config(db=db, dataset_id=request.dataset_id)
+    use_query_rewrite = request.enable_query_rewrite or bool(dataset_config["enable_query_rewrite"])
+    if use_query_rewrite:
         retrieval_query = rewrite_query(request.query, model=request.model)
 
-    k = request.k or settings.top_k
+    final_k = request.k or int(dataset_config["final_k"]) or settings.top_k
     sources = retrieve_similar_chunks(
         db=db,
         query=retrieval_query,
-        k=k,
+        k=final_k,
         dataset_id=request.dataset_id,
+        top_k_bm25=int(dataset_config["top_k_bm25"]),
+        top_k_dense=int(dataset_config["top_k_dense"]),
+        fusion_method=str(dataset_config["fusion_method"]),
+        rerank_enabled=bool(dataset_config["rerank_enabled"]),
+        rerank_model=str(dataset_config["rerank_model"]),
     )
-    if request.enable_rerank:
+    if request.enable_rerank and request.dataset_id is None:
         sources = rerank_sources(request.query, sources)
     answer = generate_answer(query=request.query, sources=sources, model=request.model)
     evaluation = evaluate_rag_output(
@@ -165,17 +184,24 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
     conversation_id = request.conversation_id or _new_conversation_id()
 
     retrieval_query = request.query
-    if request.enable_query_rewrite:
+    dataset_config = _get_dataset_config(db=db, dataset_id=request.dataset_id)
+    use_query_rewrite = request.enable_query_rewrite or bool(dataset_config["enable_query_rewrite"])
+    if use_query_rewrite:
         retrieval_query = rewrite_query(request.query, model=request.model)
 
-    k = request.k or settings.top_k
+    final_k = request.k or int(dataset_config["final_k"]) or settings.top_k
     sources = retrieve_similar_chunks(
         db=db,
         query=retrieval_query,
-        k=k,
+        k=final_k,
         dataset_id=request.dataset_id,
+        top_k_bm25=int(dataset_config["top_k_bm25"]),
+        top_k_dense=int(dataset_config["top_k_dense"]),
+        fusion_method=str(dataset_config["fusion_method"]),
+        rerank_enabled=bool(dataset_config["rerank_enabled"]),
+        rerank_model=str(dataset_config["rerank_model"]),
     )
-    if request.enable_rerank:
+    if request.enable_rerank and request.dataset_id is None:
         sources = rerank_sources(request.query, sources)
 
     def event_stream() -> Generator[str, None, None]:
@@ -412,7 +438,12 @@ async def upload_dataset_file(
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     text = await parse_uploaded_file(file)
-    chunks = split_text_recursive(text=text, chunk_size=500, chunk_overlap=50)
+    dataset_config = resolve_dataset_config(dataset.config)
+    chunks = split_text_recursive(
+        text=text,
+        chunk_size=int(dataset_config["chunk_size"]),
+        chunk_overlap=int(dataset_config["chunk_overlap"]),
+    )
     if not chunks:
         raise HTTPException(status_code=400, detail="No text chunks were generated")
 
@@ -442,6 +473,11 @@ async def upload_dataset_file(
         )
     db.add_all(chunk_rows)
     db.flush()
+    add_embeddings(
+        dataset_id=dataset.id,
+        embeddings=vectors,
+        chunk_ids=[chunk.id for chunk in chunk_rows],
+    )
     index_chunks(
         dataset_id=dataset.id,
         items=[
@@ -558,3 +594,12 @@ def _avg_metric(rows: list[Evaluation], metric: str) -> float:
     if not values:
         return 0.0
     return round(sum(values) / len(values), 4)
+
+
+def _get_dataset_config(db: Session, dataset_id: int | None) -> dict:
+    if dataset_id is None:
+        return resolve_dataset_config({})
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return resolve_dataset_config(dataset.config)
