@@ -52,8 +52,19 @@ jobs:
       - name: API startup smoke test
         working-directory: backend
         run: |
-          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
           UVICORN_PID=$!
-          trap "kill $UVICORN_PID" EXIT
-          sleep 5
-          curl --fail http://127.0.0.1:8000/api/health
+          trap 'kill "$UVICORN_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/api/health > /dev/null; then
+              echo "Backend is ready."
+              curl --fail http://127.0.0.1:8000/api/health
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Backend failed to become ready."
+          cat uvicorn.log || true
+          exit 1
