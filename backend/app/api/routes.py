@@ -27,6 +27,7 @@ from app.schemas import (
     WorkflowRunResponse,
 )
 from app.services.chat import generate_answer, stream_answer_tokens
+from app.services.bm25 import index_chunks
 from app.services.document_parser import parse_uploaded_file
 from app.services.embeddings import embed_texts
 from app.services.evaluation import evaluate_rag_output
@@ -87,6 +88,18 @@ async def upload_document(
             )
         )
     db.add_all(chunk_rows)
+    db.flush()
+    index_chunks(
+        dataset_id=default_dataset.id,
+        items=[
+            {
+                "chunk_id": chunk.id,
+                "content": chunk.content,
+                "metadata": chunk.chunk_metadata,
+            }
+            for chunk in chunk_rows
+        ],
+    )
     db.commit()
 
     return UploadResponse(
@@ -428,6 +441,18 @@ async def upload_dataset_file(
             )
         )
     db.add_all(chunk_rows)
+    db.flush()
+    index_chunks(
+        dataset_id=dataset.id,
+        items=[
+            {
+                "chunk_id": chunk.id,
+                "content": chunk.content,
+                "metadata": chunk.chunk_metadata,
+            }
+            for chunk in chunk_rows
+        ],
+    )
     db.commit()
     db.refresh(data_file)
     return DatasetFileResponse(

@@ -18,6 +18,10 @@ class Settings:
     chat_model_options: tuple[str, ...] = ("qwen3:8b", "llama3.2:latest")
     top_k: int = int(os.getenv("TOP_K", "5"))
     embedding_dimension: int = int(os.getenv("EMBEDDING_DIMENSION", "768"))
+    elasticsearch_url: str = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+    elasticsearch_username: str | None = os.getenv("ELASTICSEARCH_USERNAME")
+    elasticsearch_password: str | None = os.getenv("ELASTICSEARCH_PASSWORD")
+    elasticsearch_timeout_seconds: int = int(os.getenv("ELASTICSEARCH_TIMEOUT_SECONDS", "10"))
 
 
 settings = Settings()
