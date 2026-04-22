@@ -56,7 +56,8 @@ def _rerank_with_cross_encoder(
     logits = model.predict(pairs)
     # Cross-encoder outputs are often logits (can be negative). Convert to [0, 1].
     scores = [1.0 / (1.0 + math.exp(-float(logit))) for logit in logits]
-    scored = list(zip(scores, chunks, strict=False))
+    normalized_scores = _min_max_normalize(scores)
+    scored = list(zip(normalized_scores, chunks, strict=False))
     scored.sort(key=lambda item: float(item[0]), reverse=True)
     return [_with_score(chunk=chunk, score=float(score)) for score, chunk in scored[:top_k]]
 
@@ -107,8 +108,13 @@ def _rerank_with_llm(
             except (TypeError, ValueError, AttributeError):
                 continue
         scored_chunks = [
-            (score_by_id.get(chunk.chunk_id, 0.0), chunk)
+            (score_by_id.get(chunk.chunk_id, float(chunk.score)), chunk)
             for chunk in chunks
+        ]
+        normalized = _min_max_normalize([score for score, _ in scored_chunks])
+        scored_chunks = [
+            (normalized_score, chunk)
+            for normalized_score, (_, chunk) in zip(normalized, scored_chunks, strict=False)
         ]
         scored_chunks.sort(key=lambda item: item[0], reverse=True)
         return [
@@ -145,6 +151,17 @@ def _with_score(chunk: SourceChunk, score: float) -> SourceChunk:
         metadata=chunk.metadata,
         score=score,
     )
+
+
+def _min_max_normalize(scores: list[float]) -> list[float]:
+    if not scores:
+        return []
+    low = min(scores)
+    high = max(scores)
+    span = high - low
+    if span <= 1e-9:
+        return [0.5 for _ in scores]
+    return [(score - low) / span for score in scores]
 
 
 _cross_encoders_by_model: dict[str, object] = {}
