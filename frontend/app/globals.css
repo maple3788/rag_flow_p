@@ -234,6 +234,18 @@ body {
   margin: 0.2rem 0;
 }
 
+.dataset-create-form {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
 .workflow-wrap {
   background: #1b1f27;
   border: 1px solid #2d3340;

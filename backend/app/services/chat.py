@@ -12,7 +12,7 @@ def build_prompt(query: str, sources: list[SourceChunk]) -> str:
     context_blocks = []
     for src in sources:
         context_blocks.append(
-            f"[Doc: {src.document_name} | Chunk ID: {src.chunk_id}]\n{src.content}"
+            f"[Dataset: {src.dataset_id} | File: {src.filename} | Chunk ID: {src.chunk_id}]\n{src.content}"
         )
     context = "\n\n".join(context_blocks) if context_blocks else "No context retrieved."
     return (

@@ -18,10 +18,10 @@ async def parse_uploaded_file(upload: UploadFile) -> str:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     if suffix == ".pdf":
-        return _extract_pdf_text(data)
+        return _sanitize_text(_extract_pdf_text(data))
     if suffix == ".docx":
-        return _extract_docx_text(data)
-    return data.decode("utf-8", errors="ignore")
+        return _sanitize_text(_extract_docx_text(data))
+    return _sanitize_text(data.decode("utf-8", errors="ignore"))
 
 
 def _extract_pdf_text(data: bytes) -> str:
@@ -40,3 +40,8 @@ def _extract_docx_text(data: bytes) -> str:
     if not text:
         raise HTTPException(status_code=400, detail="Could not extract text from DOCX")
     return text
+
+
+def _sanitize_text(text: str) -> str:
+    # PostgreSQL text fields reject NUL bytes.
+    return text.replace("\x00", "")

@@ -14,7 +14,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <header className="topbar">
           <h1>RAG Flow</h1>
           <nav>
-            <Link href="/upload">Upload</Link>
+            <Link href="/datasets">Datasets</Link>
             <Link href="/chat">Chat</Link>
             <Link href="/workflow">Workflow</Link>
           </nav>

@@ -6,6 +6,9 @@ export default function HomePage() {
       <h2>Minimal RAG Demo</h2>
       <p>Upload knowledge files, then ask questions over indexed chunks.</p>
       <div className="actions">
+        <Link className="button secondary" href="/datasets">
+          Manage Datasets
+        </Link>
         <Link className="button" href="/upload">
           Go to Upload
         </Link>

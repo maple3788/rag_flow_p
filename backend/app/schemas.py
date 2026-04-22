@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class UploadResponse(BaseModel):
@@ -8,8 +10,9 @@ class UploadResponse(BaseModel):
 
 
 class SourceChunk(BaseModel):
-    document_id: int
-    document_name: str
+    dataset_id: int
+    file_id: int
+    filename: str
     chunk_id: int
     content: str
     metadata: dict
@@ -19,6 +22,7 @@ class SourceChunk(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     k: int | None = None
+    dataset_id: int | None = None
     model: str | None = None
     conversation_id: str | None = None
     enable_query_rewrite: bool = False
@@ -90,3 +94,38 @@ class EvaluationSummaryPoint(BaseModel):
     relevance: float
     context_precision: float
     count: int
+
+
+class DatasetCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    config: dict = Field(default_factory=dict)
+
+
+class DatasetUpdateRequest(BaseModel):
+    description: str | None = None
+    config: dict | None = None
+
+
+class DatasetResponse(BaseModel):
+    id: int
+    name: str
+    description: str
+    config: dict
+    created_at: datetime
+
+
+class DatasetFileResponse(BaseModel):
+    id: int
+    dataset_id: int
+    filename: str
+    raw_text: str
+    metadata: dict
+
+
+class DatasetChunkResponse(BaseModel):
+    id: int
+    file_id: int
+    dataset_id: int
+    content: str
+    metadata: dict

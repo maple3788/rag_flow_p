@@ -1,6 +1,7 @@
 export type SourceChunk = {
-  document_id: number;
-  document_name: string;
+  dataset_id: number;
+  file_id: number;
+  filename: string;
   chunk_id: number;
   content: string;
   metadata: Record<string, unknown>;
@@ -63,6 +64,30 @@ export type WorkflowRunResponse = {
   node_outputs: Record<string, Record<string, unknown>>;
 };
 
+export type Dataset = {
+  id: number;
+  name: string;
+  description: string;
+  config: Record<string, unknown>;
+  created_at: string;
+};
+
+export type DatasetFile = {
+  id: number;
+  dataset_id: number;
+  filename: string;
+  raw_text: string;
+  metadata: Record<string, unknown>;
+};
+
+export type DatasetChunk = {
+  id: number;
+  file_id: number;
+  dataset_id: number;
+  content: string;
+  metadata: Record<string, unknown>;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
 export async function uploadFile(file: File): Promise<{
@@ -89,7 +114,7 @@ export async function sendChat(
   k = 5,
   model: LlmModel = "qwen3:8b",
   conversationId?: string,
-  options?: { enableQueryRewrite?: boolean; enableRerank?: boolean }
+  options?: { enableQueryRewrite?: boolean; enableRerank?: boolean; datasetId?: number }
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
@@ -99,6 +124,7 @@ export async function sendChat(
       k,
       model,
       conversation_id: conversationId,
+      dataset_id: options?.datasetId,
       enable_query_rewrite: Boolean(options?.enableQueryRewrite),
       enable_rerank: Boolean(options?.enableRerank),
     }),
@@ -115,7 +141,7 @@ export async function streamChat(
   k: number,
   model: LlmModel,
   conversationId: string | undefined,
-  options: { enableQueryRewrite?: boolean; enableRerank?: boolean },
+  options: { enableQueryRewrite?: boolean; enableRerank?: boolean; datasetId?: number },
   handlers: {
     onToken: (token: string) => void;
     onDone: (payload: ChatResponse) => void;
@@ -129,6 +155,7 @@ export async function streamChat(
       k,
       model,
       conversation_id: conversationId,
+      dataset_id: options.datasetId,
       enable_query_rewrite: Boolean(options.enableQueryRewrite),
       enable_rerank: Boolean(options.enableRerank),
     }),
@@ -232,6 +259,121 @@ export async function evaluateAnswer(
   if (!response.ok) {
     const payload = await safeJson(response);
     throw new Error(payload?.detail ?? "Evaluation failed");
+  }
+  return response.json();
+}
+
+export async function createDataset(payload: {
+  name: string;
+  description?: string;
+  config?: Record<string, unknown>;
+}): Promise<Dataset> {
+  const response = await fetch(`${API_BASE_URL}/datasets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: payload.name,
+      description: payload.description ?? "",
+      config: payload.config ?? {},
+    }),
+  });
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to create dataset");
+  }
+  return response.json();
+}
+
+export async function listDatasets(): Promise<Dataset[]> {
+  const response = await fetch(`${API_BASE_URL}/datasets`);
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to list datasets");
+  }
+  return response.json();
+}
+
+export async function getDataset(datasetId: number): Promise<Dataset> {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}`);
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to get dataset");
+  }
+  return response.json();
+}
+
+export async function updateDataset(
+  datasetId: number,
+  payload: { description?: string; config?: Record<string, unknown> }
+): Promise<Dataset> {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to update dataset");
+  }
+  return response.json();
+}
+
+export async function deleteDataset(datasetId: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to delete dataset");
+  }
+}
+
+export async function uploadDatasetFile(datasetId: number, file: File): Promise<DatasetFile> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/files`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to upload dataset file");
+  }
+  return response.json();
+}
+
+export async function listDatasetFiles(datasetId: number): Promise<DatasetFile[]> {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/files`);
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to list files");
+  }
+  return response.json();
+}
+
+export async function deleteDatasetFile(datasetId: number, fileId: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/files/${fileId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to delete file");
+  }
+}
+
+export async function listDatasetChunks(
+  datasetId: number,
+  fileId?: number
+): Promise<DatasetChunk[]> {
+  const params = new URLSearchParams();
+  if (typeof fileId === "number") params.set("file_id", String(fileId));
+  const query = params.toString();
+  const response = await fetch(
+    `${API_BASE_URL}/datasets/${datasetId}/chunks${query ? `?${query}` : ""}`
+  );
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to list chunks");
   }
   return response.json();
 }

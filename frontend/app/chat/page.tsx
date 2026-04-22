@@ -5,8 +5,10 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   getEvaluationHistory,
   getEvaluationSummary,
+  listDatasets,
   streamChat,
   type ChatResponse,
+  type Dataset,
   type EvaluationHistoryItem,
   type EvaluationScores,
   type EvaluationSummaryPoint,
@@ -31,6 +33,8 @@ export default function ChatPage() {
   const [model, setModel] = useState<LlmModel>("qwen3:8b");
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
   const [enableRerank, setEnableRerank] = useState(false);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [history, setHistory] = useState<EvaluationHistoryItem[]>([]);
   const [summary, setSummary] = useState<EvaluationSummaryPoint[]>([]);
@@ -41,6 +45,10 @@ export default function ChatPage() {
     if (saved) {
       setConversationId(saved);
     }
+  }, []);
+
+  useEffect(() => {
+    void loadDatasets();
   }, []);
 
   useEffect(() => {
@@ -73,6 +81,18 @@ export default function ChatPage() {
     }
   }
 
+  async function loadDatasets() {
+    try {
+      const items = await listDatasets();
+      setDatasets(items);
+      if (items.length > 0) {
+        setSelectedDatasetId(String(items[0].id));
+      }
+    } catch {
+      // Keep chat usable even if dataset fetch fails.
+    }
+  }
+
   function startNewSession() {
     const nextId = crypto.randomUUID().replace(/-/g, "");
     localStorage.setItem("chat_conversation_id", nextId);
@@ -102,7 +122,11 @@ export default function ChatPage() {
         5,
         model,
         conversationId,
-        { enableQueryRewrite, enableRerank },
+        {
+          enableQueryRewrite,
+          enableRerank,
+          datasetId: selectedDatasetId ? Number(selectedDatasetId) : undefined,
+        },
         {
         onToken: (token) => {
           setMessages((prev) =>
@@ -181,7 +205,7 @@ export default function ChatPage() {
                 {message.sources.map((source) => (
                   <div key={source.chunk_id} className="source-item">
                     <p>
-                      <strong>{source.document_name}</strong> (chunk {source.chunk_id}, score{" "}
+                      <strong>{source.filename}</strong> (chunk {source.chunk_id}, score{" "}
                       {source.score.toFixed(4)})
                     </p>
                     <p>{source.content}</p>
@@ -210,6 +234,19 @@ export default function ChatPage() {
       <form className="chat-form" onSubmit={onSubmit}>
         <select
           className="model-select"
+          value={selectedDatasetId}
+          onChange={(event) => setSelectedDatasetId(event.target.value)}
+          disabled={loading || datasets.length === 0}
+        >
+          {datasets.length === 0 && <option value="">No datasets</option>}
+          {datasets.map((dataset) => (
+            <option key={dataset.id} value={dataset.id}>
+              {dataset.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="model-select"
           value={model}
           onChange={(event) => setModel(event.target.value as LlmModel)}
           disabled={loading}
@@ -227,6 +264,9 @@ export default function ChatPage() {
           {loading ? "Thinking..." : "Send"}
         </button>
       </form>
+      {datasets.length === 0 && (
+        <p className="muted">No datasets found. Create one in the Datasets page first.</p>
+      )}
       <div className="history-scores">
         <label className="inspector-checkbox">
           <input

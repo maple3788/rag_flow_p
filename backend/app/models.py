@@ -11,14 +11,45 @@ class Base(DeclarativeBase):
     pass
 
 
-class Document(Base):
-    __tablename__ = "documents"
+class Dataset(Base):
+    __tablename__ = "datasets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    files: Mapped[list["DataFile"]] = relationship(
+        "DataFile",
+        back_populates="dataset",
+        cascade="all, delete-orphan",
+    )
     chunks: Mapped[list["Chunk"]] = relationship(
         "Chunk",
-        back_populates="document",
+        back_populates="dataset",
+        cascade="all, delete-orphan",
+    )
+
+
+class DataFile(Base):
+    __tablename__ = "files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    dataset_id: Mapped[int] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    file_metadata: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
+
+    dataset: Mapped[Dataset] = relationship("Dataset", back_populates="files")
+    chunks: Mapped[list["Chunk"]] = relationship(
+        "Chunk",
+        back_populates="file",
         cascade="all, delete-orphan",
     )
 
@@ -27,8 +58,13 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    document_id: Mapped[int] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"),
+    file_id: Mapped[int] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    dataset_id: Mapped[int] = mapped_column(
+        ForeignKey("datasets.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -40,7 +76,8 @@ class Chunk(Base):
         "metadata", JSON, nullable=False, default=dict
     )
 
-    document: Mapped[Document] = relationship("Document", back_populates="chunks")
+    file: Mapped[DataFile] = relationship("DataFile", back_populates="chunks")
+    dataset: Mapped[Dataset] = relationship("Dataset", back_populates="chunks")
 
 
 class Evaluation(Base):

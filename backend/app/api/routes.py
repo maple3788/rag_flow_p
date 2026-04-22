@@ -9,10 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
-from app.models import Chunk, Document, Evaluation
+from app.models import Chunk, DataFile, Dataset, Evaluation
 from app.schemas import (
     ChatRequest,
     ChatResponse,
+    DatasetChunkResponse,
+    DatasetCreateRequest,
+    DatasetFileResponse,
+    DatasetResponse,
+    DatasetUpdateRequest,
     EvaluationHistoryItem,
     EvaluationSummaryPoint,
     EvaluateRequest,
@@ -44,6 +49,15 @@ async def upload_document(
     db: Session = Depends(get_db),
 ) -> UploadResponse:
     text = await parse_uploaded_file(file)
+    default_dataset = db.query(Dataset).filter(Dataset.name == "default").first()
+    if default_dataset is None:
+        default_dataset = Dataset(
+            name="default",
+            description="Auto-created default dataset",
+            config={},
+        )
+        db.add(default_dataset)
+        db.flush()
     chunks = split_text_recursive(text=text, chunk_size=500, chunk_overlap=50)
     if not chunks:
         raise HTTPException(status_code=400, detail="No text chunks were generated")
@@ -52,15 +66,21 @@ async def upload_document(
     if len(vectors) != len(chunks):
         raise HTTPException(status_code=500, detail="Embedding generation failed")
 
-    document = Document(name=file.filename or "uploaded_document")
-    db.add(document)
+    data_file = DataFile(
+        dataset_id=default_dataset.id,
+        filename=file.filename or "uploaded_document",
+        raw_text=text,
+        file_metadata={},
+    )
+    db.add(data_file)
     db.flush()
 
     chunk_rows = []
     for idx, (chunk_text, vector) in enumerate(zip(chunks, vectors, strict=False)):
         chunk_rows.append(
             Chunk(
-                document_id=document.id,
+                file_id=data_file.id,
+                dataset_id=default_dataset.id,
                 content=chunk_text,
                 embedding=vector,
                 chunk_metadata={"chunk_index": idx},
@@ -70,8 +90,8 @@ async def upload_document(
     db.commit()
 
     return UploadResponse(
-        document_id=document.id,
-        file_name=document.name,
+        document_id=data_file.id,
+        file_name=data_file.filename,
         chunks_indexed=len(chunk_rows),
     )
 
@@ -89,7 +109,12 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         retrieval_query = rewrite_query(request.query, model=request.model)
 
     k = request.k or settings.top_k
-    sources = retrieve_similar_chunks(db=db, query=retrieval_query, k=k)
+    sources = retrieve_similar_chunks(
+        db=db,
+        query=retrieval_query,
+        k=k,
+        dataset_id=request.dataset_id,
+    )
     if request.enable_rerank:
         sources = rerank_sources(request.query, sources)
     answer = generate_answer(query=request.query, sources=sources, model=request.model)
@@ -131,7 +156,12 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
         retrieval_query = rewrite_query(request.query, model=request.model)
 
     k = request.k or settings.top_k
-    sources = retrieve_similar_chunks(db=db, query=retrieval_query, k=k)
+    sources = retrieve_similar_chunks(
+        db=db,
+        query=retrieval_query,
+        k=k,
+        dataset_id=request.dataset_id,
+    )
     if request.enable_rerank:
         sources = rerank_sources(request.query, sources)
 
@@ -268,6 +298,211 @@ def run_workflow_api(
     request: WorkflowRunRequest, db: Session = Depends(get_db)
 ) -> WorkflowRunResponse:
     return run_workflow(payload=request, db=db)
+
+
+@router.post("/datasets", response_model=DatasetResponse)
+def create_dataset(
+    request: DatasetCreateRequest,
+    db: Session = Depends(get_db),
+) -> DatasetResponse:
+    existing = db.query(Dataset).filter(Dataset.name == request.name).first()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="Dataset name already exists")
+    dataset = Dataset(
+        name=request.name.strip(),
+        description=request.description,
+        config=request.config,
+    )
+    db.add(dataset)
+    db.commit()
+    db.refresh(dataset)
+    return DatasetResponse(
+        id=dataset.id,
+        name=dataset.name,
+        description=dataset.description,
+        config=dataset.config,
+        created_at=dataset.created_at,
+    )
+
+
+@router.get("/datasets", response_model=list[DatasetResponse])
+def list_datasets(db: Session = Depends(get_db)) -> list[DatasetResponse]:
+    datasets = db.query(Dataset).order_by(desc(Dataset.created_at)).all()
+    return [
+        DatasetResponse(
+            id=dataset.id,
+            name=dataset.name,
+            description=dataset.description,
+            config=dataset.config,
+            created_at=dataset.created_at,
+        )
+        for dataset in datasets
+    ]
+
+
+@router.get("/datasets/{dataset_id}", response_model=DatasetResponse)
+def get_dataset(dataset_id: int, db: Session = Depends(get_db)) -> DatasetResponse:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return DatasetResponse(
+        id=dataset.id,
+        name=dataset.name,
+        description=dataset.description,
+        config=dataset.config,
+        created_at=dataset.created_at,
+    )
+
+
+@router.patch("/datasets/{dataset_id}", response_model=DatasetResponse)
+def update_dataset(
+    dataset_id: int,
+    request: DatasetUpdateRequest,
+    db: Session = Depends(get_db),
+) -> DatasetResponse:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if request.description is not None:
+        dataset.description = request.description
+    if request.config is not None:
+        dataset.config = request.config
+    db.commit()
+    db.refresh(dataset)
+    return DatasetResponse(
+        id=dataset.id,
+        name=dataset.name,
+        description=dataset.description,
+        config=dataset.config,
+        created_at=dataset.created_at,
+    )
+
+
+@router.delete("/datasets/{dataset_id}")
+def delete_dataset(dataset_id: int, db: Session = Depends(get_db)) -> dict:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    db.delete(dataset)
+    db.commit()
+    return {"status": "deleted", "dataset_id": dataset_id}
+
+
+@router.post("/datasets/{dataset_id}/files", response_model=DatasetFileResponse)
+async def upload_dataset_file(
+    dataset_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> DatasetFileResponse:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    text = await parse_uploaded_file(file)
+    chunks = split_text_recursive(text=text, chunk_size=500, chunk_overlap=50)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="No text chunks were generated")
+
+    vectors = embed_texts(chunks)
+    if len(vectors) != len(chunks):
+        raise HTTPException(status_code=500, detail="Embedding generation failed")
+
+    data_file = DataFile(
+        dataset_id=dataset.id,
+        filename=file.filename or "uploaded_document",
+        raw_text=text,
+        file_metadata={},
+    )
+    db.add(data_file)
+    db.flush()
+
+    chunk_rows = []
+    for idx, (chunk_text, vector) in enumerate(zip(chunks, vectors, strict=False)):
+        chunk_rows.append(
+            Chunk(
+                file_id=data_file.id,
+                dataset_id=dataset.id,
+                content=chunk_text,
+                embedding=vector,
+                chunk_metadata={"chunk_index": idx},
+            )
+        )
+    db.add_all(chunk_rows)
+    db.commit()
+    db.refresh(data_file)
+    return DatasetFileResponse(
+        id=data_file.id,
+        dataset_id=data_file.dataset_id,
+        filename=data_file.filename,
+        raw_text=data_file.raw_text,
+        metadata=data_file.file_metadata,
+    )
+
+
+@router.get("/datasets/{dataset_id}/files", response_model=list[DatasetFileResponse])
+def list_dataset_files(
+    dataset_id: int, db: Session = Depends(get_db)
+) -> list[DatasetFileResponse]:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    rows = db.query(DataFile).filter(DataFile.dataset_id == dataset_id).order_by(DataFile.id.desc()).all()
+    return [
+        DatasetFileResponse(
+            id=row.id,
+            dataset_id=row.dataset_id,
+            filename=row.filename,
+            raw_text=row.raw_text,
+            metadata=row.file_metadata,
+        )
+        for row in rows
+    ]
+
+
+@router.delete("/datasets/{dataset_id}/files/{file_id}")
+def delete_dataset_file(
+    dataset_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    data_file = (
+        db.query(DataFile)
+        .filter(DataFile.id == file_id, DataFile.dataset_id == dataset_id)
+        .first()
+    )
+    if data_file is None:
+        raise HTTPException(status_code=404, detail="File not found in dataset")
+    db.delete(data_file)
+    db.commit()
+    return {"status": "deleted", "dataset_id": dataset_id, "file_id": file_id}
+
+
+@router.get("/datasets/{dataset_id}/chunks", response_model=list[DatasetChunkResponse])
+def list_dataset_chunks(
+    dataset_id: int,
+    file_id: int | None = None,
+    db: Session = Depends(get_db),
+) -> list[DatasetChunkResponse]:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    query = db.query(Chunk).filter(Chunk.dataset_id == dataset_id)
+    if file_id is not None:
+        query = query.filter(Chunk.file_id == file_id)
+    rows = query.order_by(Chunk.id.desc()).all()
+    return [
+        DatasetChunkResponse(
+            id=row.id,
+            file_id=row.file_id,
+            dataset_id=row.dataset_id,
+            content=row.content,
+            metadata=row.chunk_metadata,
+        )
+        for row in rows
+    ]
 
 
 def _validate_model_option(model: str | None) -> None:
