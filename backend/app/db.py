@@ -139,37 +139,40 @@ def ensure_schema_updates() -> None:
         connection.execute(
             text(
                 """
-                INSERT INTO files (dataset_id, filename, raw_text, metadata)
-                SELECT
-                    (SELECT id FROM datasets WHERE name = 'legacy'),
-                    COALESCE(d.name, 'legacy_document_' || d.id::text),
-                    COALESCE(string_agg(c.content, E'\n\n' ORDER BY c.id), ''),
-                    '{}'::json
-                FROM documents d
-                LEFT JOIN chunks c ON c.document_id = d.id
-                WHERE EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'chunks' AND column_name = 'document_id'
-                )
-                AND NOT EXISTS (
-                    SELECT 1 FROM files f WHERE f.filename = d.name
-                )
-                GROUP BY d.id, d.name
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                UPDATE chunks c
-                SET dataset_id = f.dataset_id,
-                    file_id = f.id
-                FROM files f
-                WHERE c.file_id IS NULL
-                AND c.document_id IS NOT NULL
-                AND f.filename = (
-                    SELECT d.name FROM documents d WHERE d.id = c.document_id
-                )
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_name = 'documents'
+                    ) AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'chunks' AND column_name = 'document_id'
+                    ) THEN
+                        INSERT INTO files (dataset_id, filename, raw_text, metadata)
+                        SELECT
+                            (SELECT id FROM datasets WHERE name = 'legacy'),
+                            COALESCE(d.name, 'legacy_document_' || d.id::text),
+                            COALESCE(string_agg(c.content, E'\n\n' ORDER BY c.id), ''),
+                            '{}'::json
+                        FROM documents d
+                        LEFT JOIN chunks c ON c.document_id = d.id
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM files f WHERE f.filename = d.name
+                        )
+                        GROUP BY d.id, d.name;
+
+                        UPDATE chunks c
+                        SET dataset_id = f.dataset_id,
+                            file_id = f.id
+                        FROM files f
+                        WHERE c.file_id IS NULL
+                        AND c.document_id IS NOT NULL
+                        AND f.filename = (
+                            SELECT d.name FROM documents d WHERE d.id = c.document_id
+                        );
+                    END IF;
+                END
+                $$;
                 """
             )
         )
