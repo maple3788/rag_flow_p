@@ -25,6 +25,7 @@ from app.services.chat import generate_answer, stream_answer_tokens
 from app.services.document_parser import parse_uploaded_file
 from app.services.embeddings import embed_texts
 from app.services.evaluation import evaluate_rag_output
+from app.services.query_ops import rerank_sources, rewrite_query
 from app.services.retrieval import retrieve_similar_chunks
 from app.services.text_splitter import split_text_recursive
 from app.services.workflow.engine import run_workflow
@@ -83,8 +84,14 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     _validate_model_option(request.model)
     conversation_id = request.conversation_id or _new_conversation_id()
 
+    retrieval_query = request.query
+    if request.enable_query_rewrite:
+        retrieval_query = rewrite_query(request.query, model=request.model)
+
     k = request.k or settings.top_k
-    sources = retrieve_similar_chunks(db=db, query=request.query, k=k)
+    sources = retrieve_similar_chunks(db=db, query=retrieval_query, k=k)
+    if request.enable_rerank:
+        sources = rerank_sources(request.query, sources)
     answer = generate_answer(query=request.query, sources=sources, model=request.model)
     evaluation = evaluate_rag_output(
         query=request.query,
@@ -105,6 +112,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
     return ChatResponse(
         conversation_id=conversation_id,
+        rewritten_query=retrieval_query if retrieval_query != request.query else None,
         answer=answer,
         sources=sources,
         evaluation=evaluation,
@@ -118,8 +126,14 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
     _validate_model_option(request.model)
     conversation_id = request.conversation_id or _new_conversation_id()
 
+    retrieval_query = request.query
+    if request.enable_query_rewrite:
+        retrieval_query = rewrite_query(request.query, model=request.model)
+
     k = request.k or settings.top_k
-    sources = retrieve_similar_chunks(db=db, query=request.query, k=k)
+    sources = retrieve_similar_chunks(db=db, query=retrieval_query, k=k)
+    if request.enable_rerank:
+        sources = rerank_sources(request.query, sources)
 
     def event_stream() -> Generator[str, None, None]:
         answer_parts: list[str] = []
@@ -154,6 +168,9 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
                 {
                     "type": "done",
                     "conversation_id": conversation_id,
+                    "rewritten_query": (
+                        retrieval_query if retrieval_query != request.query else None
+                    ),
                     "answer": answer,
                     "sources": [source.model_dump() for source in sources],
                     "evaluation": evaluation.model_dump(),

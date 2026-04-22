@@ -16,7 +16,7 @@ import "reactflow/dist/style.css";
 
 import { runWorkflow, type WorkflowEdge, type WorkflowNode } from "@/lib/api";
 
-type NodeTypeName = "InputNode" | "RetrieverNode" | "LLMNode" | "OutputNode";
+type NodeTypeName = "InputNode" | "RetrieverNode" | "LLMNode" | "AgentNode" | "OutputNode";
 
 const defaultNodes: Node[] = [
   {
@@ -70,6 +70,7 @@ export default function WorkflowPage() {
       RetrieverNode: nodes.filter((n) => nodeTypeFromLabel(n.data?.label) === "RetrieverNode")
         .length,
       LLMNode: nodes.filter((n) => nodeTypeFromLabel(n.data?.label) === "LLMNode").length,
+      AgentNode: nodes.filter((n) => nodeTypeFromLabel(n.data?.label) === "AgentNode").length,
       OutputNode: nodes.filter((n) => nodeTypeFromLabel(n.data?.label) === "OutputNode").length,
     }),
     [nodes]
@@ -82,6 +83,10 @@ export default function WorkflowPage() {
     () => edges.filter((edge) => edge.selected).map((edge) => edge.id),
     [edges]
   );
+  const selectedNode = useMemo(
+    () => nodes.find((node) => node.selected) ?? null,
+    [nodes]
+  );
 
   function addNode(type: NodeTypeName) {
     const id = `${type.toLowerCase()}-${Date.now()}`;
@@ -90,6 +95,12 @@ export default function WorkflowPage() {
     if (type === "RetrieverNode") defaultData.k = 5;
     if (type === "LLMNode")
       defaultData.template = "Use retrieved context to answer the user question.";
+    if (type === "AgentNode") {
+      defaultData.max_steps = 5;
+      defaultData.k = 5;
+      defaultData.use_web_search = false;
+      defaultData.model = "qwen3:8b";
+    }
 
     setNodes((prev) => [
       ...prev,
@@ -164,6 +175,17 @@ export default function WorkflowPage() {
     );
   }
 
+  function updateSelectedNodeData(patch: Record<string, unknown>) {
+    if (!selectedNode) return;
+    setNodes((prev) =>
+      prev.map((node) =>
+        node.id === selectedNode.id
+          ? { ...node, data: { ...(node.data ?? {}), ...patch } }
+          : node
+      )
+    );
+  }
+
   return (
     <section className="workflow-wrap">
       <h2>Workflow Builder</h2>
@@ -180,6 +202,9 @@ export default function WorkflowPage() {
         </button>
         <button className="button secondary" onClick={() => addNode("LLMNode")}>
           Add LLMNode
+        </button>
+        <button className="button secondary" onClick={() => addNode("AgentNode")}>
+          Add AgentNode
         </button>
         <button className="button secondary" onClick={() => addNode("OutputNode")}>
           Add OutputNode
@@ -198,7 +223,7 @@ export default function WorkflowPage() {
 
       <div className="workflow-stats muted">
         Nodes: Input {counts.InputNode} | Retriever {counts.RetrieverNode} | LLM {counts.LLMNode} |
-        Output {counts.OutputNode}
+        Agent {counts.AgentNode} | Output {counts.OutputNode}
       </div>
       <div className="workflow-stats muted">
         Selected: {selectedNodeIds.length} node(s), {selectedEdgeIds.length} edge(s). Use Delete
@@ -219,6 +244,150 @@ export default function WorkflowPage() {
           <Controls />
           <Background />
         </ReactFlow>
+      </div>
+
+      <div className="workflow-inspector">
+        <h3>Node Inspector</h3>
+        {!selectedNode && <p className="muted">Select a node to edit its settings.</p>}
+        {selectedNode && (
+          <div className="inspector-fields">
+            <p className="muted">
+              Editing: <strong>{String(selectedNode.data?.label ?? selectedNode.id)}</strong>
+            </p>
+            <p className="muted">Node ID: {selectedNode.id}</p>
+
+            {nodeTypeFromLabel(selectedNode.data?.label) === "InputNode" && (
+              <label>
+                Query
+                <textarea
+                  className="json-box"
+                  value={String(selectedNode.data?.query ?? "")}
+                  onChange={(event) =>
+                    updateSelectedNodeData({ query: event.target.value })
+                  }
+                />
+              </label>
+            )}
+
+            {nodeTypeFromLabel(selectedNode.data?.label) === "RetrieverNode" && (
+              <label>
+                Top K
+                <input
+                  className="inspector-input"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={Number(selectedNode.data?.k ?? 5)}
+                  onChange={(event) =>
+                    updateSelectedNodeData({
+                      k: Number(event.target.value || 5),
+                    })
+                  }
+                />
+              </label>
+            )}
+
+            {nodeTypeFromLabel(selectedNode.data?.label) === "LLMNode" && (
+              <>
+                <label>
+                  Prompt Template
+                  <textarea
+                    className="json-box"
+                    value={String(selectedNode.data?.template ?? "")}
+                    onChange={(event) =>
+                      updateSelectedNodeData({ template: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Model
+                  <select
+                    className="inspector-input"
+                    value={String(selectedNode.data?.model ?? "qwen3:8b")}
+                    onChange={(event) =>
+                      updateSelectedNodeData({ model: event.target.value })
+                    }
+                  >
+                    <option value="qwen3:8b">qwen3:8b</option>
+                    <option value="llama3.2:latest">llama3.2:latest</option>
+                  </select>
+                </label>
+              </>
+            )}
+
+            {nodeTypeFromLabel(selectedNode.data?.label) === "AgentNode" && (
+              <>
+                <label>
+                  Query (optional)
+                  <textarea
+                    className="json-box"
+                    value={String(selectedNode.data?.query ?? "")}
+                    onChange={(event) =>
+                      updateSelectedNodeData({ query: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Top K
+                  <input
+                    className="inspector-input"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={Number(selectedNode.data?.k ?? 5)}
+                    onChange={(event) =>
+                      updateSelectedNodeData({
+                        k: Number(event.target.value || 5),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Max Steps
+                  <input
+                    className="inspector-input"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={Number(selectedNode.data?.max_steps ?? 5)}
+                    onChange={(event) =>
+                      updateSelectedNodeData({
+                        max_steps: Number(event.target.value || 5),
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Model
+                  <select
+                    className="inspector-input"
+                    value={String(selectedNode.data?.model ?? "qwen3:8b")}
+                    onChange={(event) =>
+                      updateSelectedNodeData({ model: event.target.value })
+                    }
+                  >
+                    <option value="qwen3:8b">qwen3:8b</option>
+                    <option value="llama3.2:latest">llama3.2:latest</option>
+                  </select>
+                </label>
+                <label className="inspector-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedNode.data?.use_web_search ?? false)}
+                    onChange={(event) =>
+                      updateSelectedNodeData({ use_web_search: event.target.checked })
+                    }
+                  />
+                  Enable web search tool
+                </label>
+              </>
+            )}
+
+            {nodeTypeFromLabel(selectedNode.data?.label) === "OutputNode" && (
+              <p className="muted">OutputNode has no editable fields.</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="workflow-toolbar">
@@ -254,6 +423,7 @@ function nodeTypeFromLabel(label: unknown): NodeTypeName | null {
     label === "InputNode" ||
     label === "RetrieverNode" ||
     label === "LLMNode" ||
+    label === "AgentNode" ||
     label === "OutputNode"
   ) {
     return label;
@@ -293,6 +463,15 @@ function normalizeNodeData(data: Record<string, unknown>, type: NodeTypeName): R
   }
   if (type === "LLMNode") {
     return { template: String(data.template ?? "") };
+  }
+  if (type === "AgentNode") {
+    return {
+      query: String(data.query ?? ""),
+      k: Number(data.k ?? 5),
+      max_steps: Number(data.max_steps ?? 5),
+      use_web_search: Boolean(data.use_web_search ?? false),
+      model: String(data.model ?? "qwen3:8b"),
+    };
   }
   return {};
 }

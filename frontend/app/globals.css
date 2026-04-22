@@ -271,3 +271,35 @@ body {
   background: #12161d;
   color: #eceff4;
 }
+
+.workflow-inspector {
+  margin-top: 1rem;
+  border: 1px solid #2d3340;
+  border-radius: 10px;
+  padding: 0.9rem;
+  background: #151922;
+}
+
+.inspector-fields {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.inspector-fields label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.inspector-input {
+  border: 1px solid #3a4250;
+  border-radius: 8px;
+  padding: 0.55rem;
+  background: #12161d;
+  color: #eceff4;
+}
+
+.inspector-checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 0.5rem;
+}

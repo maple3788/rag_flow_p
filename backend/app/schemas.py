@@ -21,6 +21,8 @@ class ChatRequest(BaseModel):
     k: int | None = None
     model: str | None = None
     conversation_id: str | None = None
+    enable_query_rewrite: bool = False
+    enable_rerank: bool = False
 
 
 class EvaluationScores(BaseModel):
@@ -32,6 +34,7 @@ class EvaluationScores(BaseModel):
 
 class ChatResponse(BaseModel):
     conversation_id: str
+    rewritten_query: str | None = None
     answer: str
     sources: list[SourceChunk]
     evaluation: EvaluationScores | None = None

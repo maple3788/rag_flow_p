@@ -9,6 +9,7 @@ export type SourceChunk = {
 
 export type ChatResponse = {
   conversation_id: string;
+  rewritten_query?: string | null;
   answer: string;
   sources: SourceChunk[];
   evaluation?: EvaluationScores;
@@ -46,7 +47,7 @@ export type EvaluationSummaryPoint = {
 
 export type WorkflowNode = {
   id: string;
-  type: "InputNode" | "RetrieverNode" | "LLMNode" | "OutputNode";
+  type: "InputNode" | "RetrieverNode" | "LLMNode" | "AgentNode" | "OutputNode";
   position: { x: number; y: number };
   data: Record<string, unknown>;
 };
@@ -87,12 +88,20 @@ export async function sendChat(
   query: string,
   k = 5,
   model: LlmModel = "qwen3:8b",
-  conversationId?: string
+  conversationId?: string,
+  options?: { enableQueryRewrite?: boolean; enableRerank?: boolean }
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, k, model, conversation_id: conversationId }),
+    body: JSON.stringify({
+      query,
+      k,
+      model,
+      conversation_id: conversationId,
+      enable_query_rewrite: Boolean(options?.enableQueryRewrite),
+      enable_rerank: Boolean(options?.enableRerank),
+    }),
   });
   if (!response.ok) {
     const payload = await safeJson(response);
@@ -106,6 +115,7 @@ export async function streamChat(
   k: number,
   model: LlmModel,
   conversationId: string | undefined,
+  options: { enableQueryRewrite?: boolean; enableRerank?: boolean },
   handlers: {
     onToken: (token: string) => void;
     onDone: (payload: ChatResponse) => void;
@@ -114,7 +124,14 @@ export async function streamChat(
   const response = await fetch(`${API_BASE_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, k, model, conversation_id: conversationId }),
+    body: JSON.stringify({
+      query,
+      k,
+      model,
+      conversation_id: conversationId,
+      enable_query_rewrite: Boolean(options.enableQueryRewrite),
+      enable_rerank: Boolean(options.enableRerank),
+    }),
   });
   if (!response.ok || !response.body) {
     const payload = await safeJson(response);
@@ -147,6 +164,7 @@ export async function streamChat(
       if (event.type === "done") {
         handlers.onDone({
           conversation_id: String(event.conversation_id ?? ""),
+          rewritten_query: event.rewritten_query ?? null,
           answer: String(event.answer ?? ""),
           sources: Array.isArray(event.sources) ? event.sources : [],
           evaluation: event.evaluation,

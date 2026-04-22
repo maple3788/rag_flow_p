@@ -6,6 +6,7 @@ psycopg[binary]
 pgvector
 python-dotenv
 requests
+langgraph
 langchain-text-splitters
 PyMuPDF
 python-docx

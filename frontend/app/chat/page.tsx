@@ -17,6 +17,7 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  rewrittenQuery?: string | null;
   sources?: ChatResponse["sources"];
   evaluation?: EvaluationScores;
 };
@@ -28,6 +29,8 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [model, setModel] = useState<LlmModel>("qwen3:8b");
+  const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
+  const [enableRerank, setEnableRerank] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [history, setHistory] = useState<EvaluationHistoryItem[]>([]);
   const [summary, setSummary] = useState<EvaluationSummaryPoint[]>([]);
@@ -94,7 +97,13 @@ export default function ChatPage() {
     setQuery("");
 
     try {
-      await streamChat(trimmed, 5, model, conversationId, {
+      await streamChat(
+        trimmed,
+        5,
+        model,
+        conversationId,
+        { enableQueryRewrite, enableRerank },
+        {
         onToken: (token) => {
           setMessages((prev) =>
             prev.map((message) =>
@@ -114,6 +123,7 @@ export default function ChatPage() {
               message.id === assistantId
                 ? {
                     ...message,
+                    rewrittenQuery: result.rewritten_query,
                     content: result.answer,
                     sources: result.sources,
                     evaluation: result.evaluation,
@@ -122,7 +132,8 @@ export default function ChatPage() {
             )
           );
         },
-      });
+        }
+      );
       await loadHistory();
       await loadSummary();
     } catch (err) {
@@ -160,6 +171,9 @@ export default function ChatPage() {
         {messages.map((message, idx) => (
           <article key={message.id ?? `${message.role}-${idx}`} className={`message ${message.role}`}>
             <p className="message-role">{message.role === "user" ? "You" : "Assistant"}</p>
+            {message.rewrittenQuery && (
+              <p className="muted">Rewritten query: {message.rewrittenQuery}</p>
+            )}
             <p>{message.content || (message.role === "assistant" && loading ? "..." : "")}</p>
             {message.sources && message.sources.length > 0 && (
               <div className="sources">
@@ -213,6 +227,26 @@ export default function ChatPage() {
           {loading ? "Thinking..." : "Send"}
         </button>
       </form>
+      <div className="history-scores">
+        <label className="inspector-checkbox">
+          <input
+            type="checkbox"
+            checked={enableQueryRewrite}
+            onChange={(event) => setEnableQueryRewrite(event.target.checked)}
+            disabled={loading}
+          />
+          Rewrite query before retrieval
+        </label>
+        <label className="inspector-checkbox">
+          <input
+            type="checkbox"
+            checked={enableRerank}
+            onChange={(event) => setEnableRerank(event.target.checked)}
+            disabled={loading}
+          />
+          Rerank retrieved chunks
+        </label>
+      </div>
 
       {error && <p className="error">{error}</p>}
 

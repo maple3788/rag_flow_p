@@ -8,6 +8,7 @@ Minimal Retrieval-Augmented Generation stack with:
 - Chat API and frontend chat UI with source citations
 - Visual workflow builder (React Flow + DAG execution API)
 - RAG evaluation engine (LLM-as-a-judge)
+- LangGraph-powered AgentNode with tool loops
 
 ## Project Structure
 
@@ -136,3 +137,33 @@ Workflow builder UI:
 8. API returns:
    - `answer`
    - `sources` (chunk-level metadata for UI rendering)
+
+## Agent Workflow (LangGraph)
+
+`AgentNode` enables autonomous tool-using execution within the workflow engine.
+
+- Supported tools:
+  - retriever (`retrieve`)
+  - calculator (`calculate`, arithmetic expression)
+  - optional web search (`web_search`)
+- Memory/state tracked per run:
+  - query, tool results, retrieved sources, step trace, final answer
+- Loop behavior:
+  - Agent decides action -> executes tool -> decides again
+  - Stops when `finish` is chosen or `max_steps` is reached
+
+Example workflow graph JSON:
+
+```json
+{
+  "nodes": [
+    { "id": "input-1", "type": "InputNode", "position": { "x": 50, "y": 100 }, "data": { "query": "Compare biodiversity trends and estimate % change from 1200 to 980." } },
+    { "id": "agent-1", "type": "AgentNode", "position": { "x": 360, "y": 100 }, "data": { "k": 5, "max_steps": 6, "use_web_search": false, "model": "qwen3:8b" } },
+    { "id": "output-1", "type": "OutputNode", "position": { "x": 700, "y": 100 }, "data": {} }
+  ],
+  "edges": [
+    { "id": "e1", "source": "input-1", "target": "agent-1" },
+    { "id": "e2", "source": "agent-1", "target": "output-1" }
+  ]
+}
+```
