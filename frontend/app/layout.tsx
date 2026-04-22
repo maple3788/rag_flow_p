@@ -16,6 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <nav>
             <Link href="/upload">Upload</Link>
             <Link href="/chat">Chat</Link>
+            <Link href="/workflow">Workflow</Link>
           </nav>
         </header>
         <main className="container">{children}</main>

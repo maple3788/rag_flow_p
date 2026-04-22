@@ -12,6 +12,24 @@ export type ChatResponse = {
   sources: SourceChunk[];
 };
 
+export type WorkflowNode = {
+  id: string;
+  type: "InputNode" | "RetrieverNode" | "LLMNode" | "OutputNode";
+  position: { x: number; y: number };
+  data: Record<string, unknown>;
+};
+
+export type WorkflowEdge = {
+  id: string;
+  source: string;
+  target: string;
+};
+
+export type WorkflowRunResponse = {
+  output: string;
+  node_outputs: Record<string, Record<string, unknown>>;
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
 export async function uploadFile(file: File): Promise<{
@@ -42,6 +60,22 @@ export async function sendChat(query: string, k = 5): Promise<ChatResponse> {
   if (!response.ok) {
     const payload = await safeJson(response);
     throw new Error(payload?.detail ?? "Chat request failed");
+  }
+  return response.json();
+}
+
+export async function runWorkflow(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[]
+): Promise<WorkflowRunResponse> {
+  const response = await fetch(`${API_BASE_URL}/workflow/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nodes, edges }),
+  });
+  if (!response.ok) {
+    const payload = await safeJson(response);
+    throw new Error(payload?.detail ?? "Workflow run failed");
   }
   return response.json();
 }

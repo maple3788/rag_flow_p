@@ -24,3 +24,26 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceChunk]
+
+
+class WorkflowNode(BaseModel):
+    id: str
+    type: str
+    data: dict = {}
+    position: dict | None = None
+
+
+class WorkflowEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+
+
+class WorkflowRunRequest(BaseModel):
+    nodes: list[WorkflowNode]
+    edges: list[WorkflowEdge]
+
+
+class WorkflowRunResponse(BaseModel):
+    output: str
+    node_outputs: dict[str, dict]

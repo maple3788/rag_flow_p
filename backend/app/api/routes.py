@@ -4,12 +4,19 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db
 from app.models import Chunk, Document
-from app.schemas import ChatRequest, ChatResponse, UploadResponse
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    UploadResponse,
+    WorkflowRunRequest,
+    WorkflowRunResponse,
+)
 from app.services.chat import generate_answer
 from app.services.document_parser import parse_uploaded_file
 from app.services.embeddings import embed_texts
 from app.services.retrieval import retrieve_similar_chunks
 from app.services.text_splitter import split_text_recursive
+from app.services.workflow.engine import run_workflow
 
 router = APIRouter()
 
@@ -66,3 +73,10 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     sources = retrieve_similar_chunks(db=db, query=request.query, k=k)
     answer = generate_answer(query=request.query, sources=sources)
     return ChatResponse(answer=answer, sources=sources)
+
+
+@router.post("/workflow/run", response_model=WorkflowRunResponse)
+def run_workflow_api(
+    request: WorkflowRunRequest, db: Session = Depends(get_db)
+) -> WorkflowRunResponse:
+    return run_workflow(payload=request, db=db)

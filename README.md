@@ -6,6 +6,7 @@ Minimal Retrieval-Augmented Generation stack with:
 - PostgreSQL + `pgvector` storage
 - Similarity retrieval (`top-k`)
 - Chat API and frontend chat UI with source citations
+- Visual workflow builder (React Flow + DAG execution API)
 
 ## Project Structure
 
@@ -67,6 +68,7 @@ Backend endpoints:
 - `GET /api/health`
 - `POST /api/upload` (multipart `file`)
 - `POST /api/chat` (`{"query":"...", "k":5}`)
+- `POST /api/workflow/run` (`{"nodes":[...], "edges":[...]}`)
 
 ## Frontend Setup (Next.js)
 
@@ -92,6 +94,9 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+Workflow builder UI:
+- [http://localhost:3000/workflow](http://localhost:3000/workflow)
 
 ## Database Schema
 
