@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
+  debugDatasetRetrieval,
   deleteDataset,
   deleteDatasetFile,
   getDataset,
@@ -13,10 +14,11 @@ import {
   uploadDatasetFile,
   type Dataset,
   type DatasetChunk,
+  type RetrievalDebugResponse,
   type DatasetFile,
 } from "@/lib/api";
 
-type TabId = "files" | "chunks" | "config";
+type TabId = "files" | "chunks" | "config" | "retrieval";
 
 export default function DatasetDetailPage() {
   const params = useParams<{ id: string }>();
@@ -35,13 +37,16 @@ export default function DatasetDetailPage() {
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
-  const [finalK, setFinalK] = useState(5);
-  const [topKBm25, setTopKBm25] = useState(10);
-  const [topKDense, setTopKDense] = useState(10);
-  const [fusionMethod, setFusionMethod] = useState("rrf");
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
   const [rerankEnabled, setRerankEnabled] = useState(true);
   const [rerankModel, setRerankModel] = useState("cross-encoder/ms-marco-MiniLM-L-6-v2");
+  const [testQuery, setTestQuery] = useState("");
+  const [testTopKBm25, setTestTopKBm25] = useState(10);
+  const [testTopKDense, setTestTopKDense] = useState(10);
+  const [testFinalTopK, setTestFinalTopK] = useState(5);
+  const [testRewrite, setTestRewrite] = useState(true);
+  const [isRunningTest, setIsRunningTest] = useState(false);
+  const [testResult, setTestResult] = useState<RetrievalDebugResponse | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -60,10 +65,6 @@ export default function DatasetDetailPage() {
       setDescriptionDraft(datasetRes.description || "");
       setChunkSize(_configNumber(datasetRes.config, "chunk_size", 500));
       setChunkOverlap(_configNumber(datasetRes.config, "chunk_overlap", 50));
-      setFinalK(_configNumber(datasetRes.config, "final_k", 5));
-      setTopKBm25(_configNumber(datasetRes.config, "top_k_bm25", 10));
-      setTopKDense(_configNumber(datasetRes.config, "top_k_dense", 10));
-      setFusionMethod(_configString(datasetRes.config, "fusion_method", "rrf"));
       setEnableQueryRewrite(_configBool(datasetRes.config, "enable_query_rewrite", false));
       setRerankEnabled(_configBool(datasetRes.config, "rerank_enabled", true));
       setRerankModel(
@@ -73,6 +74,9 @@ export default function DatasetDetailPage() {
           "cross-encoder/ms-marco-MiniLM-L-6-v2"
         )
       );
+      setTestTopKBm25(10);
+      setTestTopKDense(10);
+      setTestFinalTopK(5);
       setFiles(filesRes);
       setChunks(await listDatasetChunks(datasetId));
     } catch (err) {
@@ -115,10 +119,6 @@ export default function DatasetDetailPage() {
         config: {
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
-          final_k: finalK,
-          top_k_bm25: topKBm25,
-          top_k_dense: topKDense,
-          fusion_method: fusionMethod,
           enable_query_rewrite: enableQueryRewrite,
           rerank_enabled: rerankEnabled,
           rerank_model: rerankModel,
@@ -129,6 +129,28 @@ export default function DatasetDetailPage() {
       setError(err instanceof Error ? err.message : "Failed to save config");
     } finally {
       setIsSavingConfig(false);
+    }
+  }
+
+  async function onRunRetrievalTest(event: FormEvent) {
+    event.preventDefault();
+    if (!testQuery.trim()) return;
+    setIsRunningTest(true);
+    setError("");
+    try {
+      const result = await debugDatasetRetrieval(datasetId, {
+        query: testQuery.trim(),
+        top_k_bm25: testTopKBm25,
+        top_k_dense: testTopKDense,
+        final_top_k: testFinalTopK,
+        enable_query_rewrite: testRewrite,
+      });
+      setTestResult(result);
+      setTab("retrieval");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run retrieval debug");
+    } finally {
+      setIsRunningTest(false);
     }
   }
 
@@ -193,6 +215,12 @@ export default function DatasetDetailPage() {
         </button>
         <button className={`button ${tab === "config" ? "" : "secondary"}`} onClick={() => setTab("config")}>
           Config Editor
+        </button>
+        <button
+          className={`button ${tab === "retrieval" ? "" : "secondary"}`}
+          onClick={() => setTab("retrieval")}
+        >
+          Retrieval Test
         </button>
       </div>
 
@@ -280,39 +308,6 @@ export default function DatasetDetailPage() {
               placeholder="Dataset description"
             />
             <label className="muted">
-              Final top-k (to LLM)
-              <input
-                className="inspector-input"
-                type="number"
-                min={1}
-                max={50}
-                value={finalK}
-                onChange={(event) => setFinalK(Number(event.target.value || 5))}
-              />
-            </label>
-            <label className="muted">
-              Top-k BM25
-              <input
-                className="inspector-input"
-                type="number"
-                min={1}
-                max={200}
-                value={topKBm25}
-                onChange={(event) => setTopKBm25(Number(event.target.value || 10))}
-              />
-            </label>
-            <label className="muted">
-              Top-k Dense
-              <input
-                className="inspector-input"
-                type="number"
-                min={1}
-                max={200}
-                value={topKDense}
-                onChange={(event) => setTopKDense(Number(event.target.value || 10))}
-              />
-            </label>
-            <label className="muted">
               Chunk size
               <input
                 className="inspector-input"
@@ -334,16 +329,7 @@ export default function DatasetDetailPage() {
                 onChange={(event) => setChunkOverlap(Number(event.target.value || 50))}
               />
             </label>
-            <label className="muted">
-              Fusion method
-              <select
-                className="model-select"
-                value={fusionMethod}
-                onChange={(event) => setFusionMethod(event.target.value)}
-              >
-                <option value="rrf">rrf</option>
-              </select>
-            </label>
+            <p className="muted">Fusion method: rrf (fixed)</p>
             <label className="inspector-checkbox">
               <input
                 type="checkbox"
@@ -374,8 +360,123 @@ export default function DatasetDetailPage() {
           </form>
         </section>
       )}
+      {tab === "retrieval" && (
+        <section className="history-panel">
+          <h3>Retrieval Testbench</h3>
+          <form className="dataset-create-form" onSubmit={onRunRetrievalTest}>
+            <textarea
+              className="json-box"
+              value={testQuery}
+              onChange={(event) => setTestQuery(event.target.value)}
+              placeholder="Enter a query to inspect sparse, dense, fusion, and rerank stages"
+              disabled={isRunningTest}
+            />
+            <label className="muted">
+              Top-k BM25
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={200}
+                value={testTopKBm25}
+                onChange={(event) => setTestTopKBm25(Number(event.target.value || 10))}
+                disabled={isRunningTest}
+              />
+            </label>
+            <label className="muted">
+              Top-k Dense
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={200}
+                value={testTopKDense}
+                onChange={(event) => setTestTopKDense(Number(event.target.value || 10))}
+                disabled={isRunningTest}
+              />
+            </label>
+            <label className="muted">
+              Final top-k
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={50}
+                value={testFinalTopK}
+                onChange={(event) => setTestFinalTopK(Number(event.target.value || 5))}
+                disabled={isRunningTest}
+              />
+            </label>
+            <p className="muted">Fusion method: rrf (fixed)</p>
+            <label className="inspector-checkbox">
+              <input
+                type="checkbox"
+                checked={testRewrite}
+                onChange={(event) => setTestRewrite(event.target.checked)}
+                disabled={isRunningTest}
+              />
+              Apply rewrite
+            </label>
+            <button className="button" type="submit" disabled={isRunningTest || !testQuery.trim()}>
+              {isRunningTest ? "Running..." : "Run Retrieval Debug"}
+            </button>
+          </form>
+
+          {!testResult && <p className="muted">Run a query to inspect each retrieval stage.</p>}
+          {testResult && (
+            <div className="trend-list">
+              <article className="history-item">
+                <p><strong>Original query:</strong> {testResult.original_query}</p>
+                {testResult.rewritten_query && (
+                  <p><strong>Rewritten query:</strong> {testResult.rewritten_query}</p>
+                )}
+                <p><strong>Used query:</strong> {testResult.used_query}</p>
+              </article>
+              <DebugStage title="Sparse (BM25)" hits={testResult.bm25_hits} />
+              <DebugStage title="Dense (FAISS)" hits={testResult.dense_hits} />
+              <DebugStage title="Fusion (RRF)" hits={testResult.fused_hits} />
+              <DebugStage title="Rerank" hits={testResult.reranked_hits} />
+              <article className="history-item">
+                <p><strong>Final selected chunks ({testResult.final_sources.length})</strong></p>
+                {testResult.final_sources.map((source) => (
+                  <div key={source.chunk_id} className="source-item">
+                    <p>
+                      <strong>{source.filename}</strong> chunk #{source.chunk_id} - score {source.score.toFixed(4)}
+                    </p>
+                    <p>{source.content}</p>
+                  </div>
+                ))}
+              </article>
+            </div>
+          )}
+        </section>
+      )}
       {error && <p className="error">{error}</p>}
     </section>
+  );
+}
+
+function DebugStage({
+  title,
+  hits,
+}: {
+  title: string;
+  hits: { rank: number; chunk_id: number; score: number }[];
+}) {
+  return (
+    <article className="history-item">
+      <p><strong>{title}</strong></p>
+      {hits.length === 0 && <p className="muted">No results.</p>}
+      {hits.length > 0 && (
+        <div className="history-scores">
+          {hits.map((hit) => (
+            <span key={`${title}-${hit.rank}-${hit.chunk_id}`} className="score-badge">
+              #{hit.rank} chunk {hit.chunk_id} ({hit.score.toFixed(4)})
+            </span>
+          ))}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -404,3 +505,4 @@ function _configString(config: Record<string, unknown>, key: string, fallback: s
   if (typeof raw === "string" && raw.trim()) return raw.trim();
   return fallback;
 }
+

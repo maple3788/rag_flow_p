@@ -22,6 +22,9 @@ class SourceChunk(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     k: int | None = None
+    top_k_bm25: int | None = None
+    top_k_dense: int | None = None
+    final_top_k: int | None = None
     dataset_id: int | None = None
     model: str | None = None
     conversation_id: str | None = None
@@ -36,12 +39,32 @@ class EvaluationScores(BaseModel):
     rationale: str | None = None
 
 
+class RetrievalStageHit(BaseModel):
+    rank: int
+    chunk_id: int
+    score: float
+
+
+class ChatRetrievalDebug(BaseModel):
+    dataset_id: int | None = None
+    original_query: str
+    rewritten_query: str | None = None
+    used_query: str
+    config: dict
+    bm25_hits: list[RetrievalStageHit]
+    dense_hits: list[RetrievalStageHit]
+    fused_hits: list[RetrievalStageHit]
+    reranked_hits: list[RetrievalStageHit]
+    final_sources: list[SourceChunk]
+
+
 class ChatResponse(BaseModel):
     conversation_id: str
     rewritten_query: str | None = None
     answer: str
     sources: list[SourceChunk]
     evaluation: EvaluationScores | None = None
+    retrieval_debug: ChatRetrievalDebug | None = None
 
 
 class WorkflowNode(BaseModel):
@@ -129,3 +152,26 @@ class DatasetChunkResponse(BaseModel):
     dataset_id: int
     content: str
     metadata: dict
+
+
+class RetrievalDebugRequest(BaseModel):
+    query: str = Field(min_length=1)
+    top_k: int | None = None
+    top_k_bm25: int | None = None
+    top_k_dense: int | None = None
+    final_top_k: int | None = None
+    enable_query_rewrite: bool = True
+    model: str | None = None
+
+
+class RetrievalDebugResponse(BaseModel):
+    dataset_id: int
+    original_query: str
+    rewritten_query: str | None = None
+    used_query: str
+    config: dict
+    bm25_hits: list[RetrievalStageHit]
+    dense_hits: list[RetrievalStageHit]
+    fused_hits: list[RetrievalStageHit]
+    reranked_hits: list[RetrievalStageHit]
+    final_sources: list[SourceChunk]

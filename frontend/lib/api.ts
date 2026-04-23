@@ -14,6 +14,7 @@ export type ChatResponse = {
   answer: string;
   sources: SourceChunk[];
   evaluation?: EvaluationScores;
+  retrieval_debug?: RetrievalDebugResponse | null;
 };
 
 export type LlmModel = "qwen3:8b" | "llama3.2:latest";
@@ -88,6 +89,25 @@ export type DatasetChunk = {
   metadata: Record<string, unknown>;
 };
 
+export type RetrievalStageHit = {
+  rank: number;
+  chunk_id: number;
+  score: number;
+};
+
+export type RetrievalDebugResponse = {
+  dataset_id: number;
+  original_query: string;
+  rewritten_query?: string | null;
+  used_query: string;
+  config: Record<string, unknown>;
+  bm25_hits: RetrievalStageHit[];
+  dense_hits: RetrievalStageHit[];
+  fused_hits: RetrievalStageHit[];
+  reranked_hits: RetrievalStageHit[];
+  final_sources: SourceChunk[];
+};
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
 export async function uploadFile(file: File): Promise<{
@@ -114,7 +134,14 @@ export async function sendChat(
   k: number | undefined = undefined,
   model: LlmModel = "qwen3:8b",
   conversationId?: string,
-  options?: { enableQueryRewrite?: boolean; enableRerank?: boolean; datasetId?: number }
+  options?: {
+    enableQueryRewrite?: boolean;
+    enableRerank?: boolean;
+    datasetId?: number;
+    topKBm25?: number;
+    topKDense?: number;
+    finalTopK?: number;
+  }
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
@@ -125,6 +152,9 @@ export async function sendChat(
       model,
       conversation_id: conversationId,
       dataset_id: options?.datasetId,
+      top_k_bm25: options?.topKBm25,
+      top_k_dense: options?.topKDense,
+      final_top_k: options?.finalTopK,
       enable_query_rewrite: Boolean(options?.enableQueryRewrite),
       enable_rerank: Boolean(options?.enableRerank),
     }),
@@ -141,7 +171,14 @@ export async function streamChat(
   k: number | undefined,
   model: LlmModel,
   conversationId: string | undefined,
-  options: { enableQueryRewrite?: boolean; enableRerank?: boolean; datasetId?: number },
+  options: {
+    enableQueryRewrite?: boolean;
+    enableRerank?: boolean;
+    datasetId?: number;
+    topKBm25?: number;
+    topKDense?: number;
+    finalTopK?: number;
+  },
   handlers: {
     onToken: (token: string) => void;
     onDone: (payload: ChatResponse) => void;
@@ -156,6 +193,9 @@ export async function streamChat(
       model,
       conversation_id: conversationId,
       dataset_id: options.datasetId,
+      top_k_bm25: options.topKBm25,
+      top_k_dense: options.topKDense,
+      final_top_k: options.finalTopK,
       enable_query_rewrite: Boolean(options.enableQueryRewrite),
       enable_rerank: Boolean(options.enableRerank),
     }),
@@ -195,6 +235,7 @@ export async function streamChat(
           answer: String(event.answer ?? ""),
           sources: Array.isArray(event.sources) ? event.sources : [],
           evaluation: event.evaluation,
+          retrieval_debug: event.retrieval_debug ?? null,
         });
       }
     }
@@ -374,6 +415,30 @@ export async function listDatasetChunks(
   if (!response.ok) {
     const body = await safeJson(response);
     throw new Error(body?.detail ?? "Failed to list chunks");
+  }
+  return response.json();
+}
+
+export async function debugDatasetRetrieval(
+  datasetId: number,
+  payload: {
+    query: string;
+    top_k?: number;
+    top_k_bm25?: number;
+    top_k_dense?: number;
+    final_top_k?: number;
+    enable_query_rewrite?: boolean;
+    model?: string;
+  }
+): Promise<RetrievalDebugResponse> {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/retrieval-debug`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await safeJson(response);
+    throw new Error(body?.detail ?? "Failed to run retrieval debug");
   }
   return response.json();
 }

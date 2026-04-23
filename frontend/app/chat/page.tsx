@@ -13,6 +13,7 @@ import {
   type EvaluationScores,
   type EvaluationSummaryPoint,
   type LlmModel,
+  type RetrievalDebugResponse,
 } from "@/lib/api";
 
 type Message = {
@@ -22,6 +23,7 @@ type Message = {
   rewrittenQuery?: string | null;
   sources?: ChatResponse["sources"];
   evaluation?: EvaluationScores;
+  retrievalDebug?: RetrievalDebugResponse | null;
 };
 
 export default function ChatPage() {
@@ -31,6 +33,9 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [model, setModel] = useState<LlmModel>("qwen3:8b");
+  const [topKBm25, setTopKBm25] = useState(10);
+  const [topKDense, setTopKDense] = useState(10);
+  const [finalTopK, setFinalTopK] = useState(5);
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
   const [enableRerank, setEnableRerank] = useState(false);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -119,13 +124,16 @@ export default function ChatPage() {
     try {
       await streamChat(
         trimmed,
-        undefined,
+        finalTopK,
         model,
         conversationId,
         {
           enableQueryRewrite,
           enableRerank,
           datasetId: selectedDatasetId ? Number(selectedDatasetId) : undefined,
+          topKBm25,
+          topKDense,
+          finalTopK,
         },
         {
         onToken: (token) => {
@@ -151,6 +159,7 @@ export default function ChatPage() {
                     content: result.answer,
                     sources: result.sources,
                     evaluation: result.evaluation,
+                    retrievalDebug: result.retrieval_debug,
                   }
                 : message
             )
@@ -213,6 +222,26 @@ export default function ChatPage() {
                 ))}
               </div>
             )}
+            {message.retrievalDebug && (
+              <details className="history-panel">
+                <summary className="message-role">Retrieval Pipeline</summary>
+                <p><strong>Original query:</strong> {message.retrievalDebug.original_query}</p>
+                {message.retrievalDebug.rewritten_query && (
+                  <p><strong>Rewritten query:</strong> {message.retrievalDebug.rewritten_query}</p>
+                )}
+                <p><strong>Used query:</strong> {message.retrievalDebug.used_query}</p>
+                <p className="muted">
+                  top_k_bm25={String(message.retrievalDebug.config.top_k_bm25)} | top_k_dense=
+                  {String(message.retrievalDebug.config.top_k_dense)} | final_top_k=
+                  {String(message.retrievalDebug.config.final_top_k)} | fusion=
+                  {String(message.retrievalDebug.config.fusion_method)}
+                </p>
+                <DebugStage title="Sparse (BM25)" hits={message.retrievalDebug.bm25_hits} />
+                <DebugStage title="Dense (FAISS)" hits={message.retrievalDebug.dense_hits} />
+                <DebugStage title="Fusion (RRF)" hits={message.retrievalDebug.fused_hits} />
+                <DebugStage title="Rerank" hits={message.retrievalDebug.reranked_hits} />
+              </details>
+            )}
             {message.evaluation && (
               <div className="eval-panel">
                 <p className="message-role">Evaluation</p>
@@ -268,6 +297,43 @@ export default function ChatPage() {
         <p className="muted">No datasets found. Create one in the Datasets page first.</p>
       )}
       <div className="history-scores">
+        <label className="muted">
+          Top-k BM25
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={200}
+            value={topKBm25}
+            onChange={(event) => setTopKBm25(Number(event.target.value || 10))}
+            disabled={loading}
+          />
+        </label>
+        <label className="muted">
+          Top-k Dense
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={200}
+            value={topKDense}
+            onChange={(event) => setTopKDense(Number(event.target.value || 10))}
+            disabled={loading}
+          />
+        </label>
+        <label className="muted">
+          Final top-k
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={50}
+            value={finalTopK}
+            onChange={(event) => setFinalTopK(Number(event.target.value || 5))}
+            disabled={loading}
+          />
+        </label>
+        <p className="muted">Fusion method: rrf (fixed)</p>
         <label className="inspector-checkbox">
           <input
             type="checkbox"
@@ -386,6 +452,30 @@ function MiniTrendRow({ label, value }: { label: string; value: number }) {
       <div className="score-bar">
         <div className="score-bar-fill" style={{ width: `${pct}%` }} />
       </div>
+    </div>
+  );
+}
+
+function DebugStage({
+  title,
+  hits,
+}: {
+  title: string;
+  hits: { rank: number; chunk_id: number; score: number }[];
+}) {
+  return (
+    <div>
+      <p className="message-role">{title}</p>
+      {hits.length === 0 && <p className="muted">No results.</p>}
+      {hits.length > 0 && (
+        <div className="history-scores">
+          {hits.map((hit) => (
+            <span key={`${title}-${hit.rank}-${hit.chunk_id}`} className="score-badge">
+              #{hit.rank} chunk {hit.chunk_id} ({hit.score.toFixed(4)})
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

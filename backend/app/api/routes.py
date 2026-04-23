@@ -25,6 +25,10 @@ from app.schemas import (
     UploadResponse,
     WorkflowRunRequest,
     WorkflowRunResponse,
+    RetrievalDebugRequest,
+    RetrievalDebugResponse,
+    RetrievalStageHit,
+    ChatRetrievalDebug,
 )
 from app.services.chat import generate_answer, stream_answer_tokens
 from app.services.bm25 import index_chunks
@@ -34,7 +38,7 @@ from app.services.evaluation import evaluate_rag_output
 from app.services.faiss_index import add_embeddings
 from app.services.dataset_config import resolve_dataset_config
 from app.services.query_ops import rerank_sources, rewrite_query
-from app.services.retrieval import retrieve_similar_chunks
+from app.services.retrieval import build_dataset_retrieval_debug, retrieve_similar_chunks
 from app.services.text_splitter import split_text_recursive
 from app.services.workflow.engine import run_workflow
 
@@ -135,18 +139,64 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     if use_query_rewrite:
         retrieval_query = rewrite_query(request.query, model=request.model)
 
-    final_k = request.k or int(dataset_config["final_k"]) or settings.top_k
-    sources = retrieve_similar_chunks(
-        db=db,
-        query=retrieval_query,
-        k=final_k,
-        dataset_id=request.dataset_id,
-        top_k_bm25=int(dataset_config["top_k_bm25"]),
-        top_k_dense=int(dataset_config["top_k_dense"]),
-        fusion_method=str(dataset_config["fusion_method"]),
-        rerank_enabled=bool(dataset_config["rerank_enabled"]),
-        rerank_model=str(dataset_config["rerank_model"]),
-    )
+    final_top_k = request.final_top_k or request.k or settings.top_k
+    top_k_bm25 = request.top_k_bm25 or request.k or settings.top_k
+    top_k_dense = request.top_k_dense or request.k or settings.top_k
+    retrieval_debug: ChatRetrievalDebug | None = None
+    if request.dataset_id is not None:
+        pipeline = build_dataset_retrieval_debug(
+            db=db,
+            query=retrieval_query,
+            dataset_id=request.dataset_id,
+            final_k=final_top_k,
+            top_k_bm25=top_k_bm25,
+            top_k_dense=top_k_dense,
+            fusion_method="rrf",
+            rerank_enabled=bool(dataset_config["rerank_enabled"]),
+            rerank_model=str(dataset_config["rerank_model"]),
+        )
+        sources = pipeline["final_sources"]
+        if not sources and retrieval_query != request.query:
+            retrieval_query = request.query
+            pipeline = build_dataset_retrieval_debug(
+                db=db,
+                query=retrieval_query,
+                dataset_id=request.dataset_id,
+                final_k=final_top_k,
+                top_k_bm25=top_k_bm25,
+                top_k_dense=top_k_dense,
+                fusion_method="rrf",
+                rerank_enabled=bool(dataset_config["rerank_enabled"]),
+                rerank_model=str(dataset_config["rerank_model"]),
+            )
+            sources = pipeline["final_sources"]
+        retrieval_debug = _to_chat_retrieval_debug(
+            dataset_id=request.dataset_id,
+            original_query=request.query,
+            rewritten_query=retrieval_query if retrieval_query != request.query else None,
+            used_query=retrieval_query,
+            config={
+                "top_k_bm25": top_k_bm25,
+                "top_k_dense": top_k_dense,
+                "final_top_k": final_top_k,
+                "fusion_method": "rrf",
+                "rerank_enabled": bool(dataset_config["rerank_enabled"]),
+                "rerank_model": str(dataset_config["rerank_model"]),
+            },
+            pipeline=pipeline,
+        )
+    else:
+        sources = retrieve_similar_chunks(
+            db=db,
+            query=request.query,
+            k=final_top_k,
+            dataset_id=None,
+            top_k_bm25=top_k_bm25,
+            top_k_dense=top_k_dense,
+            fusion_method="rrf",
+            rerank_enabled=bool(dataset_config["rerank_enabled"]),
+            rerank_model=str(dataset_config["rerank_model"]),
+        )
     if request.enable_rerank and request.dataset_id is None:
         sources = rerank_sources(request.query, sources)
     answer = generate_answer(query=request.query, sources=sources, model=request.model)
@@ -173,6 +223,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         answer=answer,
         sources=sources,
         evaluation=evaluation,
+        retrieval_debug=retrieval_debug,
     )
 
 
@@ -189,18 +240,64 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
     if use_query_rewrite:
         retrieval_query = rewrite_query(request.query, model=request.model)
 
-    final_k = request.k or int(dataset_config["final_k"]) or settings.top_k
-    sources = retrieve_similar_chunks(
-        db=db,
-        query=retrieval_query,
-        k=final_k,
-        dataset_id=request.dataset_id,
-        top_k_bm25=int(dataset_config["top_k_bm25"]),
-        top_k_dense=int(dataset_config["top_k_dense"]),
-        fusion_method=str(dataset_config["fusion_method"]),
-        rerank_enabled=bool(dataset_config["rerank_enabled"]),
-        rerank_model=str(dataset_config["rerank_model"]),
-    )
+    final_top_k = request.final_top_k or request.k or settings.top_k
+    top_k_bm25 = request.top_k_bm25 or request.k or settings.top_k
+    top_k_dense = request.top_k_dense or request.k or settings.top_k
+    retrieval_debug: ChatRetrievalDebug | None = None
+    if request.dataset_id is not None:
+        pipeline = build_dataset_retrieval_debug(
+            db=db,
+            query=retrieval_query,
+            dataset_id=request.dataset_id,
+            final_k=final_top_k,
+            top_k_bm25=top_k_bm25,
+            top_k_dense=top_k_dense,
+            fusion_method="rrf",
+            rerank_enabled=bool(dataset_config["rerank_enabled"]),
+            rerank_model=str(dataset_config["rerank_model"]),
+        )
+        sources = pipeline["final_sources"]
+        if not sources and retrieval_query != request.query:
+            retrieval_query = request.query
+            pipeline = build_dataset_retrieval_debug(
+                db=db,
+                query=retrieval_query,
+                dataset_id=request.dataset_id,
+                final_k=final_top_k,
+                top_k_bm25=top_k_bm25,
+                top_k_dense=top_k_dense,
+                fusion_method="rrf",
+                rerank_enabled=bool(dataset_config["rerank_enabled"]),
+                rerank_model=str(dataset_config["rerank_model"]),
+            )
+            sources = pipeline["final_sources"]
+        retrieval_debug = _to_chat_retrieval_debug(
+            dataset_id=request.dataset_id,
+            original_query=request.query,
+            rewritten_query=retrieval_query if retrieval_query != request.query else None,
+            used_query=retrieval_query,
+            config={
+                "top_k_bm25": top_k_bm25,
+                "top_k_dense": top_k_dense,
+                "final_top_k": final_top_k,
+                "fusion_method": "rrf",
+                "rerank_enabled": bool(dataset_config["rerank_enabled"]),
+                "rerank_model": str(dataset_config["rerank_model"]),
+            },
+            pipeline=pipeline,
+        )
+    else:
+        sources = retrieve_similar_chunks(
+            db=db,
+            query=request.query,
+            k=final_top_k,
+            dataset_id=None,
+            top_k_bm25=top_k_bm25,
+            top_k_dense=top_k_dense,
+            fusion_method="rrf",
+            rerank_enabled=bool(dataset_config["rerank_enabled"]),
+            rerank_model=str(dataset_config["rerank_model"]),
+        )
     if request.enable_rerank and request.dataset_id is None:
         sources = rerank_sources(request.query, sources)
 
@@ -243,6 +340,9 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
                     "answer": answer,
                     "sources": [source.model_dump() for source in sources],
                     "evaluation": evaluation.model_dump(),
+                    "retrieval_debug": (
+                        retrieval_debug.model_dump() if retrieval_debug is not None else None
+                    ),
                 }
             )
             + "\n"
@@ -566,6 +666,65 @@ def list_dataset_chunks(
     ]
 
 
+@router.post("/datasets/{dataset_id}/retrieval-debug", response_model=RetrievalDebugResponse)
+def debug_dataset_retrieval(
+    dataset_id: int,
+    request: RetrievalDebugRequest,
+    db: Session = Depends(get_db),
+) -> RetrievalDebugResponse:
+    dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    config = resolve_dataset_config(dataset.config)
+    rewritten_query: str | None = None
+    if request.enable_query_rewrite:
+        rewritten_query = rewrite_query(request.query, model=request.model)
+    used_query = rewritten_query or request.query
+
+    final_top_k = request.final_top_k or request.top_k or settings.top_k
+    top_k_bm25 = request.top_k_bm25 or request.top_k or settings.top_k
+    top_k_dense = request.top_k_dense or request.top_k or settings.top_k
+    pipeline = build_dataset_retrieval_debug(
+        db=db,
+        query=used_query,
+        dataset_id=dataset_id,
+        final_k=final_top_k,
+        top_k_bm25=top_k_bm25,
+        top_k_dense=top_k_dense,
+        fusion_method="rrf",
+        rerank_enabled=bool(config["rerank_enabled"]),
+        rerank_model=str(config["rerank_model"]),
+    )
+
+    return RetrievalDebugResponse(
+        dataset_id=dataset_id,
+        original_query=request.query,
+        rewritten_query=rewritten_query,
+        used_query=used_query,
+        config=config,
+        bm25_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=hit.chunk_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline["bm25_hits"], start=1)
+        ],
+        dense_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=hit.chunk_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline["dense_hits"], start=1)
+        ],
+        fused_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=chunk_id, score=float(score))
+            for idx, (chunk_id, score) in enumerate(pipeline["fused_hits"], start=1)
+        ],
+        reranked_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=src.chunk_id, score=float(src.score))
+            for idx, src in enumerate(pipeline["reranked_sources"], start=1)
+        ],
+        final_sources=pipeline["final_sources"],
+    )
+
+
 def _validate_model_option(model: str | None) -> None:
     if model is None:
         return
@@ -603,3 +762,37 @@ def _get_dataset_config(db: Session, dataset_id: int | None) -> dict:
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
     return resolve_dataset_config(dataset.config)
+
+
+def _to_chat_retrieval_debug(
+    dataset_id: int,
+    original_query: str,
+    rewritten_query: str | None,
+    used_query: str,
+    config: dict,
+    pipeline: dict,
+) -> ChatRetrievalDebug:
+    return ChatRetrievalDebug(
+        dataset_id=dataset_id,
+        original_query=original_query,
+        rewritten_query=rewritten_query,
+        used_query=used_query,
+        config=config,
+        bm25_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=hit.chunk_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline["bm25_hits"], start=1)
+        ],
+        dense_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=hit.chunk_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline["dense_hits"], start=1)
+        ],
+        fused_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=chunk_id, score=float(score))
+            for idx, (chunk_id, score) in enumerate(pipeline["fused_hits"], start=1)
+        ],
+        reranked_hits=[
+            RetrievalStageHit(rank=idx, chunk_id=src.chunk_id, score=float(src.score))
+            for idx, src in enumerate(pipeline["reranked_sources"], start=1)
+        ],
+        final_sources=pipeline["final_sources"],
+    )

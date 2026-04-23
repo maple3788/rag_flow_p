@@ -11,10 +11,6 @@ export default function DatasetsPage() {
   const [description, setDescription] = useState("");
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
-  const [finalK, setFinalK] = useState(5);
-  const [topKBm25, setTopKBm25] = useState(10);
-  const [topKDense, setTopKDense] = useState(10);
-  const [fusionMethod, setFusionMethod] = useState("rrf");
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
   const [rerankEnabled, setRerankEnabled] = useState(true);
   const [rerankModel, setRerankModel] = useState("cross-encoder/ms-marco-MiniLM-L-6-v2");
@@ -52,10 +48,6 @@ export default function DatasetsPage() {
         config: {
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
-          final_k: finalK,
-          top_k_bm25: topKBm25,
-          top_k_dense: topKDense,
-          fusion_method: fusionMethod,
           enable_query_rewrite: enableQueryRewrite,
           rerank_enabled: rerankEnabled,
           rerank_model: rerankModel,
@@ -65,10 +57,6 @@ export default function DatasetsPage() {
       setDescription("");
       setChunkSize(500);
       setChunkOverlap(50);
-      setFinalK(5);
-      setTopKBm25(10);
-      setTopKDense(10);
-      setFusionMethod("rrf");
       setEnableQueryRewrite(false);
       setRerankEnabled(true);
       setRerankModel("cross-encoder/ms-marco-MiniLM-L-6-v2");
@@ -116,42 +104,6 @@ export default function DatasetsPage() {
           disabled={isCreating}
         />
         <label className="muted">
-          Final top-k (to LLM)
-          <input
-            className="inspector-input"
-            type="number"
-            min={1}
-            max={50}
-            value={finalK}
-            onChange={(event) => setFinalK(Number(event.target.value || 5))}
-            disabled={isCreating}
-          />
-        </label>
-        <label className="muted">
-          Top-k BM25
-          <input
-            className="inspector-input"
-            type="number"
-            min={1}
-            max={200}
-            value={topKBm25}
-            onChange={(event) => setTopKBm25(Number(event.target.value || 10))}
-            disabled={isCreating}
-          />
-        </label>
-        <label className="muted">
-          Top-k Dense
-          <input
-            className="inspector-input"
-            type="number"
-            min={1}
-            max={200}
-            value={topKDense}
-            onChange={(event) => setTopKDense(Number(event.target.value || 10))}
-            disabled={isCreating}
-          />
-        </label>
-        <label className="muted">
           Chunk size
           <input
             className="inspector-input"
@@ -175,17 +127,7 @@ export default function DatasetsPage() {
             disabled={isCreating}
           />
         </label>
-        <label className="muted">
-          Fusion Method
-          <select
-            className="model-select"
-            value={fusionMethod}
-            onChange={(event) => setFusionMethod(event.target.value)}
-            disabled={isCreating}
-          >
-            <option value="rrf">rrf</option>
-          </select>
-        </label>
+        <p className="muted">Fusion method: rrf (fixed)</p>
         <label className="inspector-checkbox">
           <input
             type="checkbox"
