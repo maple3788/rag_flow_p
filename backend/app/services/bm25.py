@@ -13,8 +13,18 @@ class BM25Hit:
     score: float
 
 
+@dataclass
+class FileBM25Hit:
+    file_id: int
+    score: float
+
+
 def build_dataset_index_name(dataset_id: int) -> str:
     return f"dataset_{dataset_id}_bm25"
+
+
+def build_dataset_summary_index_name(dataset_id: int) -> str:
+    return f"dataset_{dataset_id}_summary_bm25"
 
 
 def index_chunks(
@@ -34,6 +44,7 @@ def index_chunks(
             json.dumps(
                 {
                     "chunk_id": chunk_id,
+                    "file_id": int(item.get("file_id", 0)),
                     "content": str(item.get("content", "")),
                     "metadata": item.get("metadata") or {},
                 }
@@ -51,18 +62,31 @@ def index_chunks(
         raise HTTPException(status_code=502, detail="Elasticsearch bulk indexing failed")
 
 
-def bm25_search(query: str, dataset_id: int, top_k: int) -> list[BM25Hit]:
+def bm25_search(
+    query: str,
+    dataset_id: int,
+    top_k: int,
+    file_ids: list[int] | None = None,
+) -> list[BM25Hit]:
     index_name = build_dataset_index_name(dataset_id)
+    must_filters: list[dict] = []
+    if file_ids:
+        must_filters.append({"terms": {"file_id": [int(file_id) for file_id in file_ids]}})
+    if must_filters:
+        query_obj: dict = {
+            "bool": {
+                "must": [{"match": {"content": query}}],
+                "filter": must_filters,
+            }
+        }
+    else:
+        query_obj = {"match": {"content": query}}
     response = _es_request(
         "POST",
         f"/{index_name}/_search",
         json={
             "size": max(1, top_k),
-            "query": {
-                "match": {
-                    "content": query,
-                }
-            },
+            "query": query_obj,
         },
         allow_404=True,
     )
@@ -76,7 +100,64 @@ def bm25_search(query: str, dataset_id: int, top_k: int) -> list[BM25Hit]:
     ]
 
 
-def _ensure_index(index_name: str) -> None:
+def index_file_summary(
+    dataset_id: int,
+    file_id: int,
+    filename: str,
+    summary: str,
+    metadata: dict | None = None,
+) -> None:
+    if not summary.strip():
+        return
+    index_name = build_dataset_summary_index_name(dataset_id)
+    _ensure_index(index_name, for_summary=True)
+    payload = "\n".join(
+        [
+            json.dumps({"index": {"_index": index_name, "_id": str(file_id)}}),
+            json.dumps(
+                {
+                    "file_id": int(file_id),
+                    "filename": filename,
+                    "content": summary,
+                    "metadata": metadata or {},
+                }
+            ),
+            "",
+        ]
+    )
+    response = _es_request(
+        "POST",
+        "/_bulk",
+        data=payload,
+        headers={"Content-Type": "application/x-ndjson"},
+    )
+    body = response.json()
+    if body.get("errors"):
+        raise HTTPException(status_code=502, detail="Elasticsearch summary indexing failed")
+
+
+def bm25_search_file_summaries(query: str, dataset_id: int, top_k: int) -> list[FileBM25Hit]:
+    index_name = build_dataset_summary_index_name(dataset_id)
+    response = _es_request(
+        "POST",
+        f"/{index_name}/_search",
+        json={
+            "size": max(1, top_k),
+            "query": {"match": {"content": query}},
+        },
+        allow_404=True,
+    )
+    if response.status_code == 404:
+        return []
+    hits = response.json().get("hits", {}).get("hits", [])
+    return [
+        FileBM25Hit(file_id=int(hit.get("_source", {}).get("file_id")), score=float(hit.get("_score", 0.0)))
+        for hit in hits
+        if hit.get("_source", {}).get("file_id") is not None
+    ]
+
+
+def _ensure_index(index_name: str, for_summary: bool = False) -> None:
     exists = _es_request("HEAD", f"/{index_name}", allow_404=True)
     if exists.status_code == 200:
         return
@@ -89,6 +170,8 @@ def _ensure_index(index_name: str) -> None:
             "mappings": {
                 "properties": {
                     "chunk_id": {"type": "integer"},
+                    "file_id": {"type": "integer"},
+                    "filename": {"type": "keyword"},
                     "content": {"type": "text"},
                     "metadata": {"type": "object", "enabled": True},
                 }

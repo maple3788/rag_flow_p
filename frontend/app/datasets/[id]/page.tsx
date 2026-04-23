@@ -37,7 +37,9 @@ export default function DatasetDetailPage() {
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
+  const [useSummary, setUseSummary] = useState(false);
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
+  const [summarizationMode, setSummarizationMode] = useState("single");
   const [rerankEnabled, setRerankEnabled] = useState(true);
   const [rerankModel, setRerankModel] = useState("cross-encoder/ms-marco-MiniLM-L-6-v2");
   const [testQuery, setTestQuery] = useState("");
@@ -45,6 +47,7 @@ export default function DatasetDetailPage() {
   const [testTopKDense, setTestTopKDense] = useState(10);
   const [testFinalTopK, setTestFinalTopK] = useState(5);
   const [testRewrite, setTestRewrite] = useState(true);
+  const [testUseSummary, setTestUseSummary] = useState(false);
   const [isRunningTest, setIsRunningTest] = useState(false);
   const [testResult, setTestResult] = useState<RetrievalDebugResponse | null>(null);
   const [error, setError] = useState("");
@@ -65,7 +68,9 @@ export default function DatasetDetailPage() {
       setDescriptionDraft(datasetRes.description || "");
       setChunkSize(_configNumber(datasetRes.config, "chunk_size", 500));
       setChunkOverlap(_configNumber(datasetRes.config, "chunk_overlap", 50));
+      setUseSummary(_configBool(datasetRes.config, "use_summary", false));
       setEnableQueryRewrite(_configBool(datasetRes.config, "enable_query_rewrite", false));
+      setSummarizationMode(_configSummaryMode(datasetRes.config, "summarization_mode", "single"));
       setRerankEnabled(_configBool(datasetRes.config, "rerank_enabled", true));
       setRerankModel(
         _configString(
@@ -119,7 +124,9 @@ export default function DatasetDetailPage() {
         config: {
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
+          use_summary: useSummary,
           enable_query_rewrite: enableQueryRewrite,
+          summarization_mode: summarizationMode,
           rerank_enabled: rerankEnabled,
           rerank_model: rerankModel,
         },
@@ -144,6 +151,7 @@ export default function DatasetDetailPage() {
         top_k_dense: testTopKDense,
         final_top_k: testFinalTopK,
         enable_query_rewrite: testRewrite,
+        use_summary: testUseSummary,
       });
       setTestResult(result);
       setTab("retrieval");
@@ -284,6 +292,33 @@ export default function DatasetDetailPage() {
               ))}
             </select>
           </div>
+          {selectedFileId !== "" && (
+            <article className="history-item">
+              <p>
+                <strong>File Summary</strong>
+              </p>
+              {(() => {
+                const targetFile = files.find((file) => file.id === selectedFileId);
+                const summaryRaw = targetFile?.metadata?.summary;
+                const summary =
+                  typeof summaryRaw === "string" && summaryRaw.trim() ? summaryRaw.trim() : "";
+                if (!targetFile) {
+                  return <p className="muted">File not found.</p>;
+                }
+                if (!summary) {
+                  return <p className="muted">No summary stored for this file.</p>;
+                }
+                return (
+                  <>
+                    <p className="muted">
+                      {targetFile.filename} (file #{targetFile.id})
+                    </p>
+                    <p>{summary}</p>
+                  </>
+                );
+              })()}
+            </article>
+          )}
           <div className="trend-list">
             {chunks.map((chunk) => (
               <article key={chunk.id} className="history-item">
@@ -330,6 +365,28 @@ export default function DatasetDetailPage() {
               />
             </label>
             <p className="muted">Fusion method: rrf (fixed)</p>
+            <label className="inspector-checkbox">
+              <input
+                type="checkbox"
+                checked={useSummary}
+                onChange={(event) => setUseSummary(event.target.checked)}
+              />
+              Use summary routing
+            </label>
+            {useSummary && (
+              <label className="muted">
+                Summarization mode
+                <select
+                  className="model-select"
+                  value={summarizationMode}
+                  onChange={(event) => setSummarizationMode(event.target.value)}
+                >
+                  <option value="single">single</option>
+                  <option value="hierarchical">hierarchical</option>
+                  <option value="iterative">iterative</option>
+                </select>
+              </label>
+            )}
             <label className="inspector-checkbox">
               <input
                 type="checkbox"
@@ -417,6 +474,15 @@ export default function DatasetDetailPage() {
               />
               Apply rewrite
             </label>
+            <label className="inspector-checkbox">
+              <input
+                type="checkbox"
+                checked={testUseSummary}
+                onChange={(event) => setTestUseSummary(event.target.checked)}
+                disabled={isRunningTest}
+              />
+              Use summary routing (if dataset has summaries)
+            </label>
             <button className="button" type="submit" disabled={isRunningTest || !testQuery.trim()}>
               {isRunningTest ? "Running..." : "Run Retrieval Debug"}
             </button>
@@ -431,10 +497,16 @@ export default function DatasetDetailPage() {
                   <p><strong>Rewritten query:</strong> {testResult.rewritten_query}</p>
                 )}
                 <p><strong>Used query:</strong> {testResult.used_query}</p>
+                <p className="muted">
+                  Summary enabled: {String(testResult.config.use_summary)} | Dataset has summary:{" "}
+                  {String(testResult.config.dataset_has_summary)} | Strategy:{" "}
+                  {String(testResult.config.summarization_mode)}
+                </p>
               </article>
               <DebugStage title="Sparse (BM25)" hits={testResult.bm25_hits} />
               <DebugStage title="Dense (FAISS)" hits={testResult.dense_hits} />
               <DebugStage title="Fusion (RRF)" hits={testResult.fused_hits} />
+              <FileRouteStage fileIds={testResult.routed_file_ids ?? []} />
               <DebugStage title="Rerank" hits={testResult.reranked_hits} />
               <article className="history-item">
                 <p><strong>Final selected chunks ({testResult.final_sources.length})</strong></p>
@@ -480,6 +552,24 @@ function DebugStage({
   );
 }
 
+function FileRouteStage({ fileIds }: { fileIds: number[] }) {
+  return (
+    <article className="history-item">
+      <p><strong>Summary File Routing</strong></p>
+      {fileIds.length === 0 && <p className="muted">No routed files (summary disabled/missing/no hit).</p>}
+      {fileIds.length > 0 && (
+        <div className="history-scores">
+          {fileIds.map((fileId, idx) => (
+            <span key={`file-route-${fileId}-${idx}`} className="score-badge">
+              #{idx + 1} file {fileId}
+            </span>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
 function _configNumber(config: Record<string, unknown>, key: string, fallback: number): number {
   const raw = config[key];
   if (typeof raw === "number" && Number.isFinite(raw)) return raw;
@@ -503,6 +593,12 @@ function _configBool(config: Record<string, unknown>, key: string, fallback: boo
 function _configString(config: Record<string, unknown>, key: string, fallback: string): string {
   const raw = config[key];
   if (typeof raw === "string" && raw.trim()) return raw.trim();
+  return fallback;
+}
+
+function _configSummaryMode(config: Record<string, unknown>, key: string, fallback: string): string {
+  const raw = _configString(config, key, fallback).toLowerCase();
+  if (raw === "single" || raw === "hierarchical" || raw === "iterative") return raw;
   return fallback;
 }
 

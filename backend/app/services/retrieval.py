@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 from app.models import Chunk, DataFile
 from app.schemas import SourceChunk
 from app.config import settings
-from app.services.bm25 import bm25_search
+from app.services.bm25 import bm25_search, bm25_search_file_summaries
 from app.services.embeddings import embed_query
-from app.services.faiss_index import dense_search
+from app.services.faiss_index import dense_search, dense_search_file_summaries
 from app.services.rrf import reciprocal_rank_fusion
 from app.services.reranker import rerank_fused_chunks
 
@@ -74,9 +74,19 @@ def build_dataset_retrieval_debug(
     fusion_method: str,
     rerank_enabled: bool,
     rerank_model: str | None,
+    use_summary: bool = False,
+    file_router_top_k: int = 8,
     query_embedding: list[float] | None = None,
 ) -> dict:
     effective_embedding = query_embedding or embed_query(query)
+    candidate_file_ids: list[int] = []
+    if use_summary:
+        candidate_file_ids = _route_candidate_files(
+            query=query,
+            dataset_id=dataset_id,
+            query_embedding=effective_embedding,
+            top_k=max(1, file_router_top_k),
+        )
     bm25_limit = max(1, top_k_bm25 or final_k)
     dense_limit = max(1, top_k_dense or final_k)
     candidate_limit = max(final_k, bm25_limit, dense_limit)
@@ -116,7 +126,16 @@ def build_dataset_retrieval_debug(
         dataset_id=dataset_id,
         chunk_ids=chunk_ids,
         score_by_chunk_id=score_by_chunk_id,
+        allowed_file_ids=set(candidate_file_ids) if candidate_file_ids else None,
     )
+    if not fused_sources and candidate_file_ids:
+        fused_sources = _fetch_sources_by_chunk_ids(
+            db=db,
+            dataset_id=dataset_id,
+            chunk_ids=chunk_ids,
+            score_by_chunk_id=score_by_chunk_id,
+            allowed_file_ids=None,
+        )
     reranked_sources = (
         rerank_fused_chunks(
             query=query,
@@ -132,6 +151,8 @@ def build_dataset_retrieval_debug(
         "bm25_hits": bm25_hits,
         "dense_hits": dense_hits,
         "fused_hits": fused,
+        "summary_used": use_summary,
+        "file_hits": candidate_file_ids,
         "reranked_sources": reranked_sources,
         "final_sources": final_sources,
     }
@@ -142,6 +163,7 @@ def _fetch_sources_by_chunk_ids(
     dataset_id: int,
     chunk_ids: list[int],
     score_by_chunk_id: dict[int, float],
+    allowed_file_ids: set[int] | None = None,
 ) -> list[SourceChunk]:
     if not chunk_ids:
         return []
@@ -158,6 +180,8 @@ def _fetch_sources_by_chunk_ids(
         if row is None:
             continue
         chunk, file_row = row
+        if allowed_file_ids is not None and file_row.id not in allowed_file_ids:
+            continue
         ordered_sources.append(
             SourceChunk(
                 dataset_id=chunk.dataset_id,
@@ -170,3 +194,27 @@ def _fetch_sources_by_chunk_ids(
             )
         )
     return ordered_sources
+
+
+def _route_candidate_files(
+    query: str,
+    dataset_id: int,
+    query_embedding: list[float],
+    top_k: int,
+) -> list[int]:
+    bm25_hits = bm25_search_file_summaries(query=query, dataset_id=dataset_id, top_k=top_k)
+    dense_hits = dense_search_file_summaries(
+        query_embedding=query_embedding,
+        dataset_id=dataset_id,
+        top_k=top_k,
+    )
+    if not bm25_hits and not dense_hits:
+        return []
+    fused = reciprocal_rank_fusion(
+        ranked_lists=[
+            [hit.file_id for hit in bm25_hits],
+            [hit.file_id for hit in dense_hits],
+        ],
+        rrf_k=settings.rrf_k,
+    )
+    return [file_id for file_id, _ in fused[:top_k]]

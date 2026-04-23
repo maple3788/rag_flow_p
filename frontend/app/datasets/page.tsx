@@ -11,9 +11,8 @@ export default function DatasetsPage() {
   const [description, setDescription] = useState("");
   const [chunkSize, setChunkSize] = useState(500);
   const [chunkOverlap, setChunkOverlap] = useState(50);
-  const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
-  const [rerankEnabled, setRerankEnabled] = useState(true);
-  const [rerankModel, setRerankModel] = useState("cross-encoder/ms-marco-MiniLM-L-6-v2");
+  const [useSummary, setUseSummary] = useState(false);
+  const [summarizationMode, setSummarizationMode] = useState("single");
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [deletingDatasetId, setDeletingDatasetId] = useState<number | null>(null);
@@ -48,18 +47,16 @@ export default function DatasetsPage() {
         config: {
           chunk_size: chunkSize,
           chunk_overlap: chunkOverlap,
-          enable_query_rewrite: enableQueryRewrite,
-          rerank_enabled: rerankEnabled,
-          rerank_model: rerankModel,
+          use_summary: useSummary,
+          summarization_mode: summarizationMode,
         },
       });
       setName("");
       setDescription("");
       setChunkSize(500);
       setChunkOverlap(50);
-      setEnableQueryRewrite(false);
-      setRerankEnabled(true);
-      setRerankModel("cross-encoder/ms-marco-MiniLM-L-6-v2");
+      setUseSummary(false);
+      setSummarizationMode("single");
       await refreshDatasets();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create dataset");
@@ -131,30 +128,27 @@ export default function DatasetsPage() {
         <label className="inspector-checkbox">
           <input
             type="checkbox"
-            checked={enableQueryRewrite}
-            onChange={(event) => setEnableQueryRewrite(event.target.checked)}
+            checked={useSummary}
+            onChange={(event) => setUseSummary(event.target.checked)}
             disabled={isCreating}
           />
-          Enable query rewrite by default
+          Use summary routing
         </label>
-        <label className="inspector-checkbox">
-          <input
-            type="checkbox"
-            checked={rerankEnabled}
-            onChange={(event) => setRerankEnabled(event.target.checked)}
-            disabled={isCreating}
-          />
-          Enable rerank
-        </label>
-        <label className="muted">
-          Rerank model
-          <input
-            className="inspector-input"
-            value={rerankModel}
-            onChange={(event) => setRerankModel(event.target.value)}
-            disabled={isCreating}
-          />
-        </label>
+        {useSummary && (
+          <label className="muted">
+            Summarization mode
+            <select
+              className="model-select"
+              value={summarizationMode}
+              onChange={(event) => setSummarizationMode(event.target.value)}
+              disabled={isCreating}
+            >
+              <option value="single">single</option>
+              <option value="hierarchical">hierarchical</option>
+              <option value="iterative">iterative</option>
+            </select>
+          </label>
+        )}
         <button className="button" type="submit" disabled={isCreating || !name.trim()}>
           {isCreating ? "Creating..." : "Create Dataset"}
         </button>

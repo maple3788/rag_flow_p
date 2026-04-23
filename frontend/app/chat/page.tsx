@@ -38,6 +38,7 @@ export default function ChatPage() {
   const [finalTopK, setFinalTopK] = useState(5);
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
   const [enableRerank, setEnableRerank] = useState(false);
+  const [useSummaryForChat, setUseSummaryForChat] = useState(false);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
@@ -134,6 +135,7 @@ export default function ChatPage() {
           topKBm25,
           topKDense,
           finalTopK,
+          useSummary: useSummaryForChat,
         },
         {
         onToken: (token) => {
@@ -236,9 +238,15 @@ export default function ChatPage() {
                   {String(message.retrievalDebug.config.final_top_k)} | fusion=
                   {String(message.retrievalDebug.config.fusion_method)}
                 </p>
+                <p className="muted">
+                  summary_enabled={String(message.retrievalDebug.config.use_summary)} | dataset_has_summary=
+                  {String(message.retrievalDebug.config.dataset_has_summary)} | strategy=
+                  {String(message.retrievalDebug.config.summarization_mode)}
+                </p>
                 <DebugStage title="Sparse (BM25)" hits={message.retrievalDebug.bm25_hits} />
                 <DebugStage title="Dense (FAISS)" hits={message.retrievalDebug.dense_hits} />
                 <DebugStage title="Fusion (RRF)" hits={message.retrievalDebug.fused_hits} />
+                <FileRouteStage fileIds={message.retrievalDebug.routed_file_ids ?? []} />
                 <DebugStage title="Rerank" hits={message.retrievalDebug.reranked_hits} />
               </details>
             )}
@@ -351,6 +359,15 @@ export default function ChatPage() {
             disabled={loading}
           />
           Rerank retrieved chunks
+        </label>
+        <label className="inspector-checkbox">
+          <input
+            type="checkbox"
+            checked={useSummaryForChat}
+            onChange={(event) => setUseSummaryForChat(event.target.checked)}
+            disabled={loading}
+          />
+          Use summary routing (if dataset has summaries)
         </label>
       </div>
 
@@ -472,6 +489,24 @@ function DebugStage({
           {hits.map((hit) => (
             <span key={`${title}-${hit.rank}-${hit.chunk_id}`} className="score-badge">
               #{hit.rank} chunk {hit.chunk_id} ({hit.score.toFixed(4)})
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FileRouteStage({ fileIds }: { fileIds: number[] }) {
+  return (
+    <div>
+      <p className="message-role">Summary File Routing</p>
+      {fileIds.length === 0 && <p className="muted">No routed files (summary disabled/missing/no hit).</p>}
+      {fileIds.length > 0 && (
+        <div className="history-scores">
+          {fileIds.map((fileId, idx) => (
+            <span key={`chat-file-route-${fileId}-${idx}`} className="score-badge">
+              #{idx + 1} file {fileId}
             </span>
           ))}
         </div>

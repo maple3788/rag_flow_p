@@ -101,6 +101,7 @@ export type RetrievalDebugResponse = {
   rewritten_query?: string | null;
   used_query: string;
   config: Record<string, unknown>;
+  routed_file_ids?: number[];
   bm25_hits: RetrievalStageHit[];
   dense_hits: RetrievalStageHit[];
   fused_hits: RetrievalStageHit[];
@@ -141,6 +142,7 @@ export async function sendChat(
     topKBm25?: number;
     topKDense?: number;
     finalTopK?: number;
+    useSummary?: boolean;
   }
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
@@ -155,6 +157,7 @@ export async function sendChat(
       top_k_bm25: options?.topKBm25,
       top_k_dense: options?.topKDense,
       final_top_k: options?.finalTopK,
+      use_summary: options?.useSummary,
       enable_query_rewrite: Boolean(options?.enableQueryRewrite),
       enable_rerank: Boolean(options?.enableRerank),
     }),
@@ -178,6 +181,7 @@ export async function streamChat(
     topKBm25?: number;
     topKDense?: number;
     finalTopK?: number;
+    useSummary?: boolean;
   },
   handlers: {
     onToken: (token: string) => void;
@@ -196,6 +200,7 @@ export async function streamChat(
       top_k_bm25: options.topKBm25,
       top_k_dense: options.topKDense,
       final_top_k: options.finalTopK,
+      use_summary: options.useSummary,
       enable_query_rewrite: Boolean(options.enableQueryRewrite),
       enable_rerank: Boolean(options.enableRerank),
     }),
@@ -428,6 +433,7 @@ export async function debugDatasetRetrieval(
     top_k_dense?: number;
     final_top_k?: number;
     enable_query_rewrite?: boolean;
+    use_summary?: boolean;
     model?: string;
   }
 ): Promise<RetrievalDebugResponse> {

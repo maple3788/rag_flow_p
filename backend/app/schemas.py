@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     enable_query_rewrite: bool = False
     enable_rerank: bool = False
+    use_summary: bool | None = None
 
 
 class EvaluationScores(BaseModel):
@@ -51,6 +52,7 @@ class ChatRetrievalDebug(BaseModel):
     rewritten_query: str | None = None
     used_query: str
     config: dict
+    routed_file_ids: list[int] = []
     bm25_hits: list[RetrievalStageHit]
     dense_hits: list[RetrievalStageHit]
     fused_hits: list[RetrievalStageHit]
@@ -161,6 +163,7 @@ class RetrievalDebugRequest(BaseModel):
     top_k_dense: int | None = None
     final_top_k: int | None = None
     enable_query_rewrite: bool = True
+    use_summary: bool | None = None
     model: str | None = None
 
 
@@ -170,6 +173,7 @@ class RetrievalDebugResponse(BaseModel):
     rewritten_query: str | None = None
     used_query: str
     config: dict
+    routed_file_ids: list[int] = []
     bm25_hits: list[RetrievalStageHit]
     dense_hits: list[RetrievalStageHit]
     fused_hits: list[RetrievalStageHit]
