@@ -95,6 +95,12 @@ export type RetrievalStageHit = {
   score: number;
 };
 
+export type RetrievalFileStageHit = {
+  rank: number;
+  file_id: number;
+  score: number;
+};
+
 export type RetrievalDebugResponse = {
   dataset_id: number;
   original_query: string;
@@ -102,6 +108,9 @@ export type RetrievalDebugResponse = {
   used_query: string;
   config: Record<string, unknown>;
   routed_file_ids?: number[];
+  summary_bm25_hits?: RetrievalFileStageHit[];
+  summary_dense_hits?: RetrievalFileStageHit[];
+  summary_fused_hits?: RetrievalFileStageHit[];
   bm25_hits: RetrievalStageHit[];
   dense_hits: RetrievalStageHit[];
   fused_hits: RetrievalStageHit[];
@@ -143,6 +152,8 @@ export async function sendChat(
     topKDense?: number;
     finalTopK?: number;
     useSummary?: boolean;
+    summaryTopK?: number;
+    summaryCandidateK?: number;
   }
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
@@ -158,6 +169,8 @@ export async function sendChat(
       top_k_dense: options?.topKDense,
       final_top_k: options?.finalTopK,
       use_summary: options?.useSummary,
+      summary_top_k: options?.summaryTopK,
+      summary_candidate_k: options?.summaryCandidateK,
       enable_query_rewrite: Boolean(options?.enableQueryRewrite),
       enable_rerank: Boolean(options?.enableRerank),
     }),
@@ -182,6 +195,8 @@ export async function streamChat(
     topKDense?: number;
     finalTopK?: number;
     useSummary?: boolean;
+    summaryTopK?: number;
+    summaryCandidateK?: number;
   },
   handlers: {
     onToken: (token: string) => void;
@@ -201,6 +216,8 @@ export async function streamChat(
       top_k_dense: options.topKDense,
       final_top_k: options.finalTopK,
       use_summary: options.useSummary,
+      summary_top_k: options.summaryTopK,
+      summary_candidate_k: options.summaryCandidateK,
       enable_query_rewrite: Boolean(options.enableQueryRewrite),
       enable_rerank: Boolean(options.enableRerank),
     }),
@@ -434,6 +451,8 @@ export async function debugDatasetRetrieval(
     final_top_k?: number;
     enable_query_rewrite?: boolean;
     use_summary?: boolean;
+    summary_top_k?: number;
+    summary_candidate_k?: number;
     model?: string;
   }
 ): Promise<RetrievalDebugResponse> {

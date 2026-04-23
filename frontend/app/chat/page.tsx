@@ -6,6 +6,7 @@ import {
   getEvaluationHistory,
   getEvaluationSummary,
   listDatasets,
+  listDatasetFiles,
   streamChat,
   type ChatResponse,
   type Dataset,
@@ -39,6 +40,9 @@ export default function ChatPage() {
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
   const [enableRerank, setEnableRerank] = useState(false);
   const [useSummaryForChat, setUseSummaryForChat] = useState(false);
+  const [summaryTopKForChat, setSummaryTopKForChat] = useState(8);
+  const [summaryCandidateKForChat, setSummaryCandidateKForChat] = useState(20);
+  const [selectedDatasetHasSummary, setSelectedDatasetHasSummary] = useState(false);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
@@ -56,6 +60,10 @@ export default function ChatPage() {
   useEffect(() => {
     void loadDatasets();
   }, []);
+
+  useEffect(() => {
+    void refreshSelectedDatasetSummaryState();
+  }, [selectedDatasetId]);
 
   useEffect(() => {
     void loadHistory();
@@ -99,6 +107,28 @@ export default function ChatPage() {
     }
   }
 
+  async function refreshSelectedDatasetSummaryState() {
+    if (!selectedDatasetId) {
+      setSelectedDatasetHasSummary(false);
+      setUseSummaryForChat(false);
+      return;
+    }
+    try {
+      const files = await listDatasetFiles(Number(selectedDatasetId));
+      const hasSummary = files.some((file) => {
+        const raw = file.metadata?.summary;
+        return typeof raw === "string" && raw.trim().length > 0;
+      });
+      setSelectedDatasetHasSummary(hasSummary);
+      if (!hasSummary) {
+        setUseSummaryForChat(false);
+      }
+    } catch {
+      setSelectedDatasetHasSummary(false);
+      setUseSummaryForChat(false);
+    }
+  }
+
   function startNewSession() {
     const nextId = crypto.randomUUID().replace(/-/g, "");
     localStorage.setItem("chat_conversation_id", nextId);
@@ -136,6 +166,8 @@ export default function ChatPage() {
           topKDense,
           finalTopK,
           useSummary: useSummaryForChat,
+          summaryTopK: summaryTopKForChat,
+          summaryCandidateK: summaryCandidateKForChat,
         },
         {
         onToken: (token) => {
@@ -246,6 +278,18 @@ export default function ChatPage() {
                 <DebugStage title="Sparse (BM25)" hits={message.retrievalDebug.bm25_hits} />
                 <DebugStage title="Dense (FAISS)" hits={message.retrievalDebug.dense_hits} />
                 <DebugStage title="Fusion (RRF)" hits={message.retrievalDebug.fused_hits} />
+                <FileStage
+                  title="Summary Sparse (BM25)"
+                  hits={message.retrievalDebug.summary_bm25_hits ?? []}
+                />
+                <FileStage
+                  title="Summary Dense (FAISS)"
+                  hits={message.retrievalDebug.summary_dense_hits ?? []}
+                />
+                <FileStage
+                  title="Summary Fusion (RRF)"
+                  hits={message.retrievalDebug.summary_fused_hits ?? []}
+                />
                 <FileRouteStage fileIds={message.retrievalDebug.routed_file_ids ?? []} />
                 <DebugStage title="Rerank" hits={message.retrievalDebug.reranked_hits} />
               </details>
@@ -365,9 +409,33 @@ export default function ChatPage() {
             type="checkbox"
             checked={useSummaryForChat}
             onChange={(event) => setUseSummaryForChat(event.target.checked)}
-            disabled={loading}
+            disabled={loading || !selectedDatasetHasSummary}
           />
           Use summary routing (if dataset has summaries)
+        </label>
+        <label className="muted">
+          Summary top-k (file routing)
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={100}
+            value={summaryTopKForChat}
+            onChange={(event) => setSummaryTopKForChat(Number(event.target.value || 8))}
+            disabled={loading || !selectedDatasetHasSummary}
+          />
+        </label>
+        <label className="muted">
+          Summary candidate-k (before RRF cut)
+          <input
+            className="inspector-input"
+            type="number"
+            min={1}
+            max={300}
+            value={summaryCandidateKForChat}
+            onChange={(event) => setSummaryCandidateKForChat(Number(event.target.value || 20))}
+            disabled={loading || !selectedDatasetHasSummary}
+          />
         </label>
       </div>
 
@@ -507,6 +575,30 @@ function FileRouteStage({ fileIds }: { fileIds: number[] }) {
           {fileIds.map((fileId, idx) => (
             <span key={`chat-file-route-${fileId}-${idx}`} className="score-badge">
               #{idx + 1} file {fileId}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FileStage({
+  title,
+  hits,
+}: {
+  title: string;
+  hits: { rank: number; file_id: number; score: number }[];
+}) {
+  return (
+    <div>
+      <p className="message-role">{title}</p>
+      {hits.length === 0 && <p className="muted">No results.</p>}
+      {hits.length > 0 && (
+        <div className="history-scores">
+          {hits.map((hit) => (
+            <span key={`${title}-${hit.rank}-${hit.file_id}`} className="score-badge">
+              #{hit.rank} file {hit.file_id} ({hit.score.toFixed(4)})
             </span>
           ))}
         </div>

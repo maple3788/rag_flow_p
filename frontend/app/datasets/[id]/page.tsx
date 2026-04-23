@@ -48,6 +48,8 @@ export default function DatasetDetailPage() {
   const [testFinalTopK, setTestFinalTopK] = useState(5);
   const [testRewrite, setTestRewrite] = useState(true);
   const [testUseSummary, setTestUseSummary] = useState(false);
+  const [testSummaryTopK, setTestSummaryTopK] = useState(8);
+  const [testSummaryCandidateK, setTestSummaryCandidateK] = useState(20);
   const [isRunningTest, setIsRunningTest] = useState(false);
   const [testResult, setTestResult] = useState<RetrievalDebugResponse | null>(null);
   const [error, setError] = useState("");
@@ -82,12 +84,25 @@ export default function DatasetDetailPage() {
       setTestTopKBm25(10);
       setTestTopKDense(10);
       setTestFinalTopK(5);
+      setTestSummaryTopK(_configNumber(datasetRes.config, "file_router_top_k", 8));
+      setTestSummaryCandidateK(20);
       setFiles(filesRes);
       setChunks(await listDatasetChunks(datasetId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dataset");
     }
   }
+
+  const datasetHasSummary = files.some((file) => {
+    const raw = file.metadata?.summary;
+    return typeof raw === "string" && raw.trim().length > 0;
+  });
+
+  useEffect(() => {
+    if (!datasetHasSummary) {
+      setTestUseSummary(false);
+    }
+  }, [datasetHasSummary]);
 
   async function onUpload(event: FormEvent) {
     event.preventDefault();
@@ -152,6 +167,8 @@ export default function DatasetDetailPage() {
         final_top_k: testFinalTopK,
         enable_query_rewrite: testRewrite,
         use_summary: testUseSummary,
+        summary_top_k: testSummaryTopK,
+        summary_candidate_k: testSummaryCandidateK,
       });
       setTestResult(result);
       setTab("retrieval");
@@ -479,9 +496,36 @@ export default function DatasetDetailPage() {
                 type="checkbox"
                 checked={testUseSummary}
                 onChange={(event) => setTestUseSummary(event.target.checked)}
-                disabled={isRunningTest}
+                disabled={isRunningTest || !datasetHasSummary}
               />
               Use summary routing (if dataset has summaries)
+            </label>
+            <p className="muted">
+              Dataset summary status: {datasetHasSummary ? "available" : "not available"}
+            </p>
+            <label className="muted">
+              Summary top-k (file routing)
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={100}
+                value={testSummaryTopK}
+                onChange={(event) => setTestSummaryTopK(Number(event.target.value || 8))}
+                disabled={isRunningTest || !datasetHasSummary}
+              />
+            </label>
+            <label className="muted">
+              Summary candidate-k (before RRF cut)
+              <input
+                className="inspector-input"
+                type="number"
+                min={1}
+                max={300}
+                value={testSummaryCandidateK}
+                onChange={(event) => setTestSummaryCandidateK(Number(event.target.value || 20))}
+                disabled={isRunningTest || !datasetHasSummary}
+              />
             </label>
             <button className="button" type="submit" disabled={isRunningTest || !testQuery.trim()}>
               {isRunningTest ? "Running..." : "Run Retrieval Debug"}
@@ -506,6 +550,9 @@ export default function DatasetDetailPage() {
               <DebugStage title="Sparse (BM25)" hits={testResult.bm25_hits} />
               <DebugStage title="Dense (FAISS)" hits={testResult.dense_hits} />
               <DebugStage title="Fusion (RRF)" hits={testResult.fused_hits} />
+              <FileStage title="Summary Sparse (BM25)" hits={testResult.summary_bm25_hits ?? []} />
+              <FileStage title="Summary Dense (FAISS)" hits={testResult.summary_dense_hits ?? []} />
+              <FileStage title="Summary Fusion (RRF)" hits={testResult.summary_fused_hits ?? []} />
               <FileRouteStage fileIds={testResult.routed_file_ids ?? []} />
               <DebugStage title="Rerank" hits={testResult.reranked_hits} />
               <article className="history-item">
@@ -562,6 +609,30 @@ function FileRouteStage({ fileIds }: { fileIds: number[] }) {
           {fileIds.map((fileId, idx) => (
             <span key={`file-route-${fileId}-${idx}`} className="score-badge">
               #{idx + 1} file {fileId}
+            </span>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function FileStage({
+  title,
+  hits,
+}: {
+  title: string;
+  hits: { rank: number; file_id: number; score: number }[];
+}) {
+  return (
+    <article className="history-item">
+      <p><strong>{title}</strong></p>
+      {hits.length === 0 && <p className="muted">No results.</p>}
+      {hits.length > 0 && (
+        <div className="history-scores">
+          {hits.map((hit) => (
+            <span key={`${title}-${hit.rank}-${hit.file_id}`} className="score-badge">
+              #{hit.rank} file {hit.file_id} ({hit.score.toFixed(4)})
             </span>
           ))}
         </div>

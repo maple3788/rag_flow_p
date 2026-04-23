@@ -31,6 +31,8 @@ class ChatRequest(BaseModel):
     enable_query_rewrite: bool = False
     enable_rerank: bool = False
     use_summary: bool | None = None
+    summary_top_k: int | None = None
+    summary_candidate_k: int | None = None
 
 
 class EvaluationScores(BaseModel):
@@ -46,6 +48,12 @@ class RetrievalStageHit(BaseModel):
     score: float
 
 
+class RetrievalFileStageHit(BaseModel):
+    rank: int
+    file_id: int
+    score: float
+
+
 class ChatRetrievalDebug(BaseModel):
     dataset_id: int | None = None
     original_query: str
@@ -53,6 +61,9 @@ class ChatRetrievalDebug(BaseModel):
     used_query: str
     config: dict
     routed_file_ids: list[int] = []
+    summary_bm25_hits: list[RetrievalFileStageHit] = []
+    summary_dense_hits: list[RetrievalFileStageHit] = []
+    summary_fused_hits: list[RetrievalFileStageHit] = []
     bm25_hits: list[RetrievalStageHit]
     dense_hits: list[RetrievalStageHit]
     fused_hits: list[RetrievalStageHit]
@@ -164,6 +175,8 @@ class RetrievalDebugRequest(BaseModel):
     final_top_k: int | None = None
     enable_query_rewrite: bool = True
     use_summary: bool | None = None
+    summary_top_k: int | None = None
+    summary_candidate_k: int | None = None
     model: str | None = None
 
 
@@ -174,6 +187,9 @@ class RetrievalDebugResponse(BaseModel):
     used_query: str
     config: dict
     routed_file_ids: list[int] = []
+    summary_bm25_hits: list[RetrievalFileStageHit] = []
+    summary_dense_hits: list[RetrievalFileStageHit] = []
+    summary_fused_hits: list[RetrievalFileStageHit] = []
     bm25_hits: list[RetrievalStageHit]
     dense_hits: list[RetrievalStageHit]
     fused_hits: list[RetrievalStageHit]

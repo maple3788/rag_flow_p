@@ -28,6 +28,7 @@ from app.schemas import (
     RetrievalDebugRequest,
     RetrievalDebugResponse,
     RetrievalStageHit,
+    RetrievalFileStageHit,
     ChatRetrievalDebug,
 )
 from app.services.chat import generate_answer, stream_answer_tokens
@@ -168,8 +169,10 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         retrieval_query = rewrite_query(request.query, model=request.model)
 
     final_top_k = request.final_top_k or request.k or settings.top_k
-    top_k_bm25 = request.top_k_bm25 or request.k or settings.top_k
-    top_k_dense = request.top_k_dense or request.k or settings.top_k
+    top_k_bm25 = request.top_k_bm25 or settings.top_k
+    top_k_dense = request.top_k_dense or settings.top_k
+    top_k_bm25 = max(final_top_k, top_k_bm25)
+    top_k_dense = max(final_top_k, top_k_dense)
     retrieval_debug: ChatRetrievalDebug | None = None
     if request.dataset_id is not None:
         dataset_has_summary = _dataset_has_summary(db=db, dataset_id=request.dataset_id)
@@ -179,6 +182,11 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
             else bool(dataset_config["use_summary"])
         )
         effective_use_summary = requested_use_summary and dataset_has_summary
+        summary_top_k = max(1, request.summary_top_k or int(dataset_config["file_router_top_k"]))
+        summary_candidate_k = max(
+            summary_top_k,
+            request.summary_candidate_k or max(top_k_bm25, top_k_dense),
+        )
         pipeline = build_dataset_retrieval_debug(
             db=db,
             query=retrieval_query,
@@ -190,7 +198,8 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
             rerank_enabled=bool(dataset_config["rerank_enabled"]),
             rerank_model=str(dataset_config["rerank_model"]),
             use_summary=effective_use_summary,
-            file_router_top_k=int(dataset_config["file_router_top_k"]),
+            file_router_top_k=summary_top_k,
+            summary_candidate_k=summary_candidate_k,
         )
         sources = pipeline["final_sources"]
         if not sources and retrieval_query != request.query:
@@ -206,7 +215,8 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
                 rerank_enabled=bool(dataset_config["rerank_enabled"]),
                 rerank_model=str(dataset_config["rerank_model"]),
                 use_summary=effective_use_summary,
-                file_router_top_k=int(dataset_config["file_router_top_k"]),
+                file_router_top_k=summary_top_k,
+                summary_candidate_k=summary_candidate_k,
             )
             sources = pipeline["final_sources"]
         retrieval_debug = _to_chat_retrieval_debug(
@@ -223,7 +233,8 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
                 "use_summary_requested": requested_use_summary,
                 "dataset_has_summary": dataset_has_summary,
                 "summarization_mode": str(dataset_config["summarization_mode"]),
-                "file_router_top_k": int(dataset_config["file_router_top_k"]),
+                "file_router_top_k": summary_top_k,
+                "summary_candidate_k": summary_candidate_k,
                 "rerank_enabled": bool(dataset_config["rerank_enabled"]),
                 "rerank_model": str(dataset_config["rerank_model"]),
             },
@@ -285,8 +296,10 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
         retrieval_query = rewrite_query(request.query, model=request.model)
 
     final_top_k = request.final_top_k or request.k or settings.top_k
-    top_k_bm25 = request.top_k_bm25 or request.k or settings.top_k
-    top_k_dense = request.top_k_dense or request.k or settings.top_k
+    top_k_bm25 = request.top_k_bm25 or settings.top_k
+    top_k_dense = request.top_k_dense or settings.top_k
+    top_k_bm25 = max(final_top_k, top_k_bm25)
+    top_k_dense = max(final_top_k, top_k_dense)
     retrieval_debug: ChatRetrievalDebug | None = None
     if request.dataset_id is not None:
         dataset_has_summary = _dataset_has_summary(db=db, dataset_id=request.dataset_id)
@@ -296,6 +309,11 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
             else bool(dataset_config["use_summary"])
         )
         effective_use_summary = requested_use_summary and dataset_has_summary
+        summary_top_k = max(1, request.summary_top_k or int(dataset_config["file_router_top_k"]))
+        summary_candidate_k = max(
+            summary_top_k,
+            request.summary_candidate_k or max(top_k_bm25, top_k_dense),
+        )
         pipeline = build_dataset_retrieval_debug(
             db=db,
             query=retrieval_query,
@@ -307,7 +325,8 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
             rerank_enabled=bool(dataset_config["rerank_enabled"]),
             rerank_model=str(dataset_config["rerank_model"]),
             use_summary=effective_use_summary,
-            file_router_top_k=int(dataset_config["file_router_top_k"]),
+            file_router_top_k=summary_top_k,
+            summary_candidate_k=summary_candidate_k,
         )
         sources = pipeline["final_sources"]
         if not sources and retrieval_query != request.query:
@@ -323,7 +342,8 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
                 rerank_enabled=bool(dataset_config["rerank_enabled"]),
                 rerank_model=str(dataset_config["rerank_model"]),
                 use_summary=effective_use_summary,
-                file_router_top_k=int(dataset_config["file_router_top_k"]),
+                file_router_top_k=summary_top_k,
+                summary_candidate_k=summary_candidate_k,
             )
             sources = pipeline["final_sources"]
         retrieval_debug = _to_chat_retrieval_debug(
@@ -340,7 +360,8 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
                 "use_summary_requested": requested_use_summary,
                 "dataset_has_summary": dataset_has_summary,
                 "summarization_mode": str(dataset_config["summarization_mode"]),
-                "file_router_top_k": int(dataset_config["file_router_top_k"]),
+                "file_router_top_k": summary_top_k,
+                "summary_candidate_k": summary_candidate_k,
                 "rerank_enabled": bool(dataset_config["rerank_enabled"]),
                 "rerank_model": str(dataset_config["rerank_model"]),
             },
@@ -772,8 +793,10 @@ def debug_dataset_retrieval(
     used_query = rewritten_query or request.query
 
     final_top_k = request.final_top_k or request.top_k or settings.top_k
-    top_k_bm25 = request.top_k_bm25 or request.top_k or settings.top_k
-    top_k_dense = request.top_k_dense or request.top_k or settings.top_k
+    top_k_bm25 = request.top_k_bm25 or settings.top_k
+    top_k_dense = request.top_k_dense or settings.top_k
+    top_k_bm25 = max(final_top_k, top_k_bm25)
+    top_k_dense = max(final_top_k, top_k_dense)
     dataset_has_summary = _dataset_has_summary(db=db, dataset_id=dataset_id)
     requested_use_summary = (
         bool(request.use_summary)
@@ -781,6 +804,11 @@ def debug_dataset_retrieval(
         else bool(config["use_summary"])
     )
     effective_use_summary = requested_use_summary and dataset_has_summary
+    summary_top_k = max(1, request.summary_top_k or int(config["file_router_top_k"]))
+    summary_candidate_k = max(
+        summary_top_k,
+        request.summary_candidate_k or max(top_k_bm25, top_k_dense),
+    )
     pipeline = build_dataset_retrieval_debug(
         db=db,
         query=used_query,
@@ -792,7 +820,8 @@ def debug_dataset_retrieval(
         rerank_enabled=bool(config["rerank_enabled"]),
         rerank_model=str(config["rerank_model"]),
         use_summary=effective_use_summary,
-        file_router_top_k=int(config["file_router_top_k"]),
+        file_router_top_k=summary_top_k,
+        summary_candidate_k=summary_candidate_k,
     )
 
     debug_config = {
@@ -800,6 +829,8 @@ def debug_dataset_retrieval(
         "use_summary": effective_use_summary,
         "use_summary_requested": requested_use_summary,
         "dataset_has_summary": dataset_has_summary,
+        "file_router_top_k": summary_top_k,
+        "summary_candidate_k": summary_candidate_k,
     }
     return RetrievalDebugResponse(
         dataset_id=dataset_id,
@@ -808,6 +839,18 @@ def debug_dataset_retrieval(
         used_query=used_query,
         config=debug_config,
         routed_file_ids=[int(file_id) for file_id in pipeline.get("file_hits", [])],
+        summary_bm25_hits=[
+            RetrievalFileStageHit(rank=idx, file_id=hit.file_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline.get("summary_bm25_hits", []), start=1)
+        ],
+        summary_dense_hits=[
+            RetrievalFileStageHit(rank=idx, file_id=hit.file_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline.get("summary_dense_hits", []), start=1)
+        ],
+        summary_fused_hits=[
+            RetrievalFileStageHit(rank=idx, file_id=file_id, score=float(score))
+            for idx, (file_id, score) in enumerate(pipeline.get("summary_fused_hits", []), start=1)
+        ],
         bm25_hits=[
             RetrievalStageHit(rank=idx, chunk_id=hit.chunk_id, score=float(hit.score))
             for idx, hit in enumerate(pipeline["bm25_hits"], start=1)
@@ -892,6 +935,18 @@ def _to_chat_retrieval_debug(
         used_query=used_query,
         config=config,
         routed_file_ids=[int(file_id) for file_id in pipeline.get("file_hits", [])],
+        summary_bm25_hits=[
+            RetrievalFileStageHit(rank=idx, file_id=hit.file_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline.get("summary_bm25_hits", []), start=1)
+        ],
+        summary_dense_hits=[
+            RetrievalFileStageHit(rank=idx, file_id=hit.file_id, score=float(hit.score))
+            for idx, hit in enumerate(pipeline.get("summary_dense_hits", []), start=1)
+        ],
+        summary_fused_hits=[
+            RetrievalFileStageHit(rank=idx, file_id=file_id, score=float(score))
+            for idx, (file_id, score) in enumerate(pipeline.get("summary_fused_hits", []), start=1)
+        ],
         bm25_hits=[
             RetrievalStageHit(rank=idx, chunk_id=hit.chunk_id, score=float(hit.score))
             for idx, hit in enumerate(pipeline["bm25_hits"], start=1)
