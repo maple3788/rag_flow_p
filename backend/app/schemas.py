@@ -91,6 +91,7 @@ class WorkflowEdge(BaseModel):
     id: str
     source: str
     target: str
+    condition: str | None = None
 
 
 class WorkflowRunRequest(BaseModel):
@@ -101,6 +102,7 @@ class WorkflowRunRequest(BaseModel):
 class WorkflowRunResponse(BaseModel):
     output: str
     node_outputs: dict[str, dict]
+    route_trace: list[dict] = []
 
 
 class EvaluateRequest(BaseModel):

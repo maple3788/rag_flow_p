@@ -42,7 +42,7 @@ from app.services.query_ops import rerank_sources, rewrite_query
 from app.services.retrieval import build_dataset_retrieval_debug, retrieve_similar_chunks
 from app.services.summarization import summarize_document
 from app.services.text_splitter import split_text_recursive
-from app.services.workflow.engine import run_workflow
+from app.services.workflow.engine import iter_workflow_events, run_workflow
 
 router = APIRouter()
 
@@ -518,6 +518,22 @@ def run_workflow_api(
     request: WorkflowRunRequest, db: Session = Depends(get_db)
 ) -> WorkflowRunResponse:
     return run_workflow(payload=request, db=db)
+
+
+@router.post("/workflow/run/stream")
+def run_workflow_stream_api(
+    request: WorkflowRunRequest, db: Session = Depends(get_db)
+) -> StreamingResponse:
+    def event_stream() -> Generator[str, None, None]:
+        try:
+            for event in iter_workflow_events(payload=request, db=db):
+                yield json.dumps(event) + "\n"
+        except HTTPException as exc:
+            yield json.dumps({"type": "error", "detail": str(exc.detail)}) + "\n"
+        except Exception as exc:  # noqa: BLE001
+            yield json.dumps({"type": "error", "detail": f"Workflow stream failed: {exc}"}) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 @router.post("/datasets", response_model=DatasetResponse)

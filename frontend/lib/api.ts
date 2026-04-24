@@ -58,12 +58,51 @@ export type WorkflowEdge = {
   id: string;
   source: string;
   target: string;
+  condition?: string | null;
 };
 
 export type WorkflowRunResponse = {
   output: string;
   node_outputs: Record<string, Record<string, unknown>>;
+  route_trace?: Array<{
+    edge_id: string;
+    source: string;
+    target: string;
+    condition?: string | null;
+  }>;
 };
+
+export type WorkflowRunStreamEvent =
+  | { type: "started"; start_nodes: string[] }
+  | {
+      type: "node_start";
+      step: number;
+      node_id: string;
+      node_type: string;
+      parents?: string[];
+    }
+  | {
+      type: "node_complete";
+      step: number;
+      node_id: string;
+      node_type: string;
+      latency_ms?: number;
+      preview?: string;
+      details?: {
+        input?: Record<string, unknown>;
+        llm?: Record<string, unknown> | null;
+        variables?: Record<string, unknown>;
+      };
+    }
+  | {
+      type: "edge_traversed";
+      edge_id: string;
+      source: string;
+      target: string;
+      condition?: string | null;
+    }
+  | { type: "done"; output: string; node_outputs: Record<string, Record<string, unknown>>; route_trace?: Array<{ edge_id: string; source: string; target: string; condition?: string | null }> }
+  | { type: "error"; detail: string };
 
 export type Dataset = {
   id: number;
@@ -306,6 +345,58 @@ export async function runWorkflow(
     throw new Error(payload?.detail ?? "Workflow run failed");
   }
   return response.json();
+}
+
+export async function runWorkflowStream(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  handlers: {
+    onEvent: (event: WorkflowRunStreamEvent) => void;
+    onDone: (payload: WorkflowRunResponse) => void;
+  }
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/workflow/run/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ nodes, edges }),
+  });
+  if (!response.ok || !response.body) {
+    const payload = await safeJson(response);
+    throw new Error(payload?.detail ?? "Workflow stream failed");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let event: WorkflowRunStreamEvent;
+      try {
+        event = JSON.parse(line) as WorkflowRunStreamEvent;
+      } catch {
+        continue;
+      }
+      handlers.onEvent(event);
+      if (event.type === "done") {
+        handlers.onDone({
+          output: String(event.output ?? ""),
+          node_outputs: event.node_outputs ?? {},
+          route_trace: event.route_trace ?? [],
+        });
+      }
+      if (event.type === "error") {
+        throw new Error(event.detail || "Workflow stream failed");
+      }
+    }
+  }
 }
 
 export async function evaluateAnswer(
