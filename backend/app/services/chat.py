@@ -10,17 +10,19 @@ from app.schemas import SourceChunk
 
 def build_prompt(query: str, sources: list[SourceChunk]) -> str:
     context_blocks = []
-    for src in sources:
+    for idx, src in enumerate(sources, start=1):
         context_blocks.append(
-            f"[Dataset: {src.dataset_id} | File: {src.filename} | Chunk ID: {src.chunk_id}]\n{src.content}"
+            f"[{idx}] [Dataset: {src.dataset_id} | File: {src.filename} | Chunk ID: {src.chunk_id}]\n{src.content}"
         )
     context = "\n\n".join(context_blocks) if context_blocks else "No context retrieved."
     return (
         "You are a helpful RAG assistant. Use only the provided context when possible. "
-        "If the answer is not in context, say that clearly.\n\n"
+        "If the answer is not in context, say that clearly.\n"
+        "When you use a fact from context, add inline citation markers like [1], [2] at the end of the sentence.\n"
+        "Only cite source numbers that exist in the provided context blocks.\n\n"
         f"Context:\n{context}\n\n"
         f"Question: {query}\n"
-        "Answer with concise, accurate information."
+        "Answer with concise, accurate information and include inline citations."
     )
 
 

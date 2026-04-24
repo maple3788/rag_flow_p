@@ -245,10 +245,10 @@ export default function ChatPage() {
             {message.sources && message.sources.length > 0 && (
               <div className="sources">
                 <p className="message-role">Sources</p>
-                {message.sources.map((source) => (
+                {message.sources.map((source, sourceIdx) => (
                   <div key={source.chunk_id} className="source-item">
                     <p>
-                      <strong>{source.filename}</strong> (chunk {source.chunk_id}, score{" "}
+                      <strong>[{sourceIdx + 1}] {source.filename}</strong> (chunk {source.chunk_id}, score{" "}
                       {source.score.toFixed(4)})
                     </p>
                     <p>{source.content}</p>
