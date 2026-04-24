@@ -347,6 +347,8 @@ class PlannerNode(BaseWorkflowNode):
             "Return strict JSON with a compact executable plan.\n"
             'Format: {"steps":[{"tool":"retrieve|calculate|api|finish","input":"...","reason":"..."}],'
             '"goal":"...","constraints":["..."]}\n'
+            "For retrieve steps, keep full semantic intent from the user query.\n"
+            "Do not reduce retrieve input to a single keyword unless explicitly asked.\n"
             f"Query: {query}\n"
             f"History: {history_json}"
         )
@@ -402,9 +404,12 @@ class ToolSelectorNode(BaseWorkflowNode):
         tool = str(selected.get("tool", "retrieve")).strip().lower()
         if tool not in {"retrieve", "calculate", "api", "finish"}:
             tool = "retrieve"
+        base_query = str(context.shared_state.get("query", context.last_query)).strip()
+        raw_args = str(selected.get("input", base_query)).strip()
+        args = _normalize_tool_args(tool=tool, args=raw_args, base_query=base_query)
         selection = {
             "tool": tool,
-            "args": str(selected.get("input", context.shared_state.get("query", ""))).strip(),
+            "args": args,
             "reason": str(selected.get("reason", "")),
             "seen_results": len(tool_results),
         }
@@ -690,6 +695,25 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_tool_args(tool: str, args: str, base_query: str) -> str:
+    normalized_tool = str(tool).strip().lower()
+    normalized_args = args.strip()
+    normalized_base = base_query.strip()
+    if normalized_tool != "retrieve":
+        return normalized_args or normalized_base
+    if not normalized_args:
+        return normalized_base
+
+    arg_tokens = [token for token in normalized_args.split() if token]
+    base_tokens = [token for token in normalized_base.split() if token]
+    # Guard against overly compressed retrieval queries like single-word inputs.
+    if len(arg_tokens) <= 1 and len(base_tokens) >= 3:
+        return normalized_base
+    if len(normalized_args) < max(12, int(len(normalized_base) * 0.35)):
+        return normalized_base
+    return normalized_args
 
 
 def _web_search(query: str) -> str:
