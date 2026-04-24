@@ -49,7 +49,17 @@ export type EvaluationSummaryPoint = {
 
 export type WorkflowNode = {
   id: string;
-  type: "InputNode" | "RetrieverNode" | "LLMNode" | "AgentNode" | "OutputNode";
+  type:
+    | "InputNode"
+    | "RetrieverNode"
+    | "LLMNode"
+    | "AgentNode"
+    | "PlannerNode"
+    | "ToolSelectorNode"
+    | "ToolExecutorNode"
+    | "ReflectionNode"
+    | "FinalAnswerNode"
+    | "OutputNode";
   position: { x: number; y: number };
   data: Record<string, unknown>;
 };

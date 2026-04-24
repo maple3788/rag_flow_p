@@ -30,6 +30,130 @@ class BaseWorkflowNode:
         raise NotImplementedError
 
 
+@dataclass
+class WorkflowToolSpec:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+class WorkflowTool:
+    spec: WorkflowToolSpec
+
+    def run(self, context: WorkflowContext, params: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+class RetrieverTool(WorkflowTool):
+    spec = WorkflowToolSpec(
+        name="retrieve",
+        description="Hybrid retrieval over chunk index with optional dataset filter.",
+        input_schema={"type": "object", "properties": {"args": {"type": "string"}}},
+    )
+
+    def __init__(self, node_data: dict[str, Any]):
+        self.node_data = node_data
+
+    def run(self, context: WorkflowContext, params: dict[str, Any]) -> dict[str, Any]:
+        args = str(params.get("args", context.last_query)).strip()
+        raw_dataset_id = self.node_data.get("dataset_id")
+        dataset_id: int | None = None
+        if raw_dataset_id not in (None, "", "null"):
+            try:
+                dataset_id = int(raw_dataset_id)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="ToolExecutorNode has invalid dataset_id for RetrieverTool",
+                )
+
+        final_k = int(self.node_data.get("final_k", self.node_data.get("k", 5)))
+        top_k_bm25 = _optional_int(self.node_data.get("top_k_bm25"))
+        top_k_dense = _optional_int(self.node_data.get("top_k_dense"))
+        rerank_enabled = bool(self.node_data.get("rerank_enabled", True))
+        sources = retrieve_similar_chunks(
+            db=context.db,
+            query=args or context.last_query,
+            k=final_k,
+            dataset_id=dataset_id,
+            top_k_bm25=top_k_bm25,
+            top_k_dense=top_k_dense,
+            rerank_enabled=rerank_enabled,
+        )
+        context.last_sources = sources
+        context.shared_state["latest_sources"] = [source.model_dump() for source in sources]
+        return {
+            "tool": self.spec.name,
+            "input": args,
+            "dataset_id": dataset_id,
+            "final_k": final_k,
+            "top_k_bm25": top_k_bm25,
+            "top_k_dense": top_k_dense,
+            "rerank_enabled": rerank_enabled,
+            "output": [source.content for source in sources],
+            "sources": [source.model_dump() for source in sources],
+        }
+
+
+class CalculatorTool(WorkflowTool):
+    spec = WorkflowToolSpec(
+        name="calculate",
+        description="Evaluate a safe arithmetic expression.",
+        input_schema={"type": "object", "properties": {"args": {"type": "string"}}},
+    )
+
+    def run(self, context: WorkflowContext, params: dict[str, Any]) -> dict[str, Any]:
+        args = str(params.get("args", "")).strip()
+        calc = _safe_calculate(args)
+        return {"tool": self.spec.name, "input": args, "output": str(calc)}
+
+
+class WebSearchTool(WorkflowTool):
+    spec = WorkflowToolSpec(
+        name="api",
+        description="Fetch lightweight public web results for the query.",
+        input_schema={"type": "object", "properties": {"args": {"type": "string"}}},
+    )
+
+    def run(self, context: WorkflowContext, params: dict[str, Any]) -> dict[str, Any]:
+        args = str(params.get("args", context.last_query)).strip()
+        return {"tool": self.spec.name, "input": args, "output": _web_search(args)}
+
+
+class ToolRegistry:
+    def __init__(self) -> None:
+        self._tools: dict[str, WorkflowTool] = {}
+
+    def register(self, tool: WorkflowTool) -> None:
+        self._tools[tool.spec.name] = tool
+
+    def get(self, name: str) -> WorkflowTool | None:
+        return self._tools.get(name)
+
+    def list_specs(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": tool.spec.name,
+                "description": tool.spec.description,
+                "input_schema": tool.spec.input_schema,
+            }
+            for tool in self._tools.values()
+        ]
+
+    def names(self) -> set[str]:
+        return set(self._tools.keys())
+
+
+def _build_tool_registry(node_data: dict[str, Any]) -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(RetrieverTool(node_data))
+    registry.register(CalculatorTool())
+    use_web_search = bool(node_data.get("enable_web_search", node_data.get("use_web_search", False)))
+    if use_web_search:
+        registry.register(WebSearchTool())
+    return registry
+
+
 class InputNode(BaseWorkflowNode):
     def execute(self, context: WorkflowContext) -> dict:
         query = str(self.node.data.get("query", "")).strip()
@@ -383,6 +507,7 @@ class PlannerNode(BaseWorkflowNode):
 
 class ToolSelectorNode(BaseWorkflowNode):
     def execute(self, context: WorkflowContext) -> dict:
+        registry = _build_tool_registry(self.node.data)
         plan = context.shared_state.get("plan", {})
         steps = plan.get("steps", []) if isinstance(plan, dict) else []
         tool_results = context.shared_state.get("tool_results", [])
@@ -401,75 +526,77 @@ class ToolSelectorNode(BaseWorkflowNode):
             fallback_query = str(context.shared_state.get("query", context.last_query)).strip()
             selected = {"tool": "retrieve", "input": fallback_query, "reason": "fallback selector"}
 
-        tool = str(selected.get("tool", "retrieve")).strip().lower()
-        if tool not in {"retrieve", "calculate", "api", "finish"}:
-            tool = "retrieve"
         base_query = str(context.shared_state.get("query", context.last_query)).strip()
-        raw_args = str(selected.get("input", base_query)).strip()
+        suggested_tool = str(selected.get("tool", "retrieve")).strip().lower()
+        suggested_input = str(selected.get("input", base_query)).strip()
+        allowed_tools = sorted(registry.names() | {"finish"})
+        tools_json = json.dumps(registry.list_specs(), ensure_ascii=True)
+        recent_json = json.dumps(tool_results[-6:], ensure_ascii=True)
+        prompt = (
+            "You are a tool selector.\n"
+            "Choose one tool and args for this step.\n"
+            "Return strict JSON only: "
+            '{"tool":"retrieve|calculate|api|finish","args":"...","reason":"..."}\n'
+            f"Allowed tools: {allowed_tools}\n"
+            f"Tool specs: {tools_json}\n"
+            f"Query: {base_query}\n"
+            f"Suggested from planner: tool={suggested_tool}, input={suggested_input}\n"
+            f"Recent tool results: {recent_json}"
+        )
+        model = str(self.node.data.get("model", settings.chat_model))
+        raw = _ollama_chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Return strict JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+        )
+        parsed = _parse_json(raw)
+        tool = str(parsed.get("tool", suggested_tool or "retrieve")).strip().lower()
+        if tool not in allowed_tools:
+            tool = suggested_tool if suggested_tool in allowed_tools else "retrieve"
+        raw_args = str(parsed.get("args", suggested_input or base_query)).strip()
         args = _normalize_tool_args(tool=tool, args=raw_args, base_query=base_query)
         selection = {
             "tool": tool,
             "args": args,
-            "reason": str(selected.get("reason", "")),
+            "reason": str(parsed.get("reason", selected.get("reason", ""))),
             "seen_results": len(tool_results),
+            "tool_specs": registry.list_specs(),
         }
         context.shared_state["selected_tool"] = selection
         context.shared_state.setdefault("history", []).append({"node": "tool_selector", "selection": selection})
-        return {"text": json.dumps(selection, ensure_ascii=True), "selection": selection}
+        return {
+            "text": json.dumps(selection, ensure_ascii=True),
+            "selection": selection,
+            "llm_trace": {
+                "provider": "ollama_chat",
+                "model": model,
+                "input": prompt,
+                "output": raw,
+            },
+        }
 
 
 class ToolExecutorNode(BaseWorkflowNode):
     def execute(self, context: WorkflowContext) -> dict:
+        registry = _build_tool_registry(self.node.data)
         selection = context.shared_state.get("selected_tool", {})
-        tool = str(selection.get("tool", "retrieve")).strip().lower()
+        tool_name = str(selection.get("tool", "retrieve")).strip().lower()
         args = str(selection.get("args", context.last_query)).strip()
-        model = str(self.node.data.get("model", settings.chat_model))
-        raw_dataset_id = self.node.data.get("dataset_id")
-        dataset_id: int | None = None
-        if raw_dataset_id not in (None, "", "null"):
-            try:
-                dataset_id = int(raw_dataset_id)
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"ToolExecutorNode '{self.node.id}' has invalid dataset_id",
-                )
-
-        result: dict[str, Any]
-        if tool == "retrieve":
-            final_k = int(self.node.data.get("final_k", self.node.data.get("k", 5)))
-            top_k_bm25 = _optional_int(self.node.data.get("top_k_bm25"))
-            top_k_dense = _optional_int(self.node.data.get("top_k_dense"))
-            rerank_enabled = bool(self.node.data.get("rerank_enabled", True))
-            sources = retrieve_similar_chunks(
-                db=context.db,
-                query=args or context.last_query,
-                k=final_k,
-                dataset_id=dataset_id,
-                top_k_bm25=top_k_bm25,
-                top_k_dense=top_k_dense,
-                rerank_enabled=rerank_enabled,
-            )
-            context.last_sources = sources
-            context.shared_state["latest_sources"] = [source.model_dump() for source in sources]
-            result = {
-                "tool": "retrieve",
-                "input": args,
-                "dataset_id": dataset_id,
-                "final_k": final_k,
-                "top_k_bm25": top_k_bm25,
-                "top_k_dense": top_k_dense,
-                "rerank_enabled": rerank_enabled,
-                "output": [source.content for source in sources],
-                "sources": [source.model_dump() for source in sources],
-            }
-        elif tool == "calculate":
-            calc = _safe_calculate(args)
-            result = {"tool": "calculate", "input": args, "output": str(calc)}
-        elif tool == "api":
-            result = {"tool": "api", "input": args, "output": _web_search(args)}
-        else:
+        if tool_name == "finish":
             result = {"tool": "finish", "input": args, "output": "No tool execution needed."}
+        else:
+            tool = registry.get(tool_name)
+            if not tool:
+                tool = registry.get("retrieve")
+                tool_name = "retrieve"
+            if not tool:
+                raise HTTPException(status_code=400, detail="No retriever tool registered")
+            result = tool.run(context=context, params={"args": args})
+            if result.get("tool") != tool_name:
+                result["tool"] = tool_name
 
         context.shared_state.setdefault("tool_results", []).append(result)
         context.shared_state.setdefault("history", []).append({"node": "tool_executor", "result": result})

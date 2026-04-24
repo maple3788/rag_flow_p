@@ -35,6 +35,14 @@ type NodeTypeName =
   | "FinalAnswerNode"
   | "OutputNode";
 
+type AgentSubgraphData = {
+  agent_data: Record<string, unknown>;
+  internal_nodes: WorkflowNode[];
+  internal_edges: WorkflowEdge[];
+  incoming_edges: WorkflowEdge[];
+  outgoing_edges: WorkflowEdge[];
+};
+
 const defaultNodes: Node[] = [
   {
     id: "input-1",
@@ -106,6 +114,83 @@ const defaultEdges: Edge[] = [
   { id: "e-final-output", source: "final-1", target: "output-1" },
 ];
 
+type WorkflowTemplate = {
+  id: string;
+  title: string;
+  mainIdea: string;
+  nodes: Node[];
+  edges: Edge[];
+};
+
+const workflowTemplates: WorkflowTemplate[] = [
+  {
+    id: "agentic-loop",
+    title: "Agentic Loop",
+    mainIdea: "Plan -> tool -> reflect until sufficient, then answer.",
+    nodes: defaultNodes,
+    edges: defaultEdges,
+  },
+  {
+    id: "retrieve-then-answer",
+    title: "Direct RAG",
+    mainIdea: "Single retrieval pass then final answer.",
+    nodes: [
+      { id: "input-a", type: "default", position: { x: 80, y: 120 }, data: { label: "InputNode", query: "Ask your question here" } },
+      { id: "executor-a", type: "default", position: { x: 360, y: 120 }, data: { label: "ToolExecutorNode", final_k: 6, top_k_bm25: 12, top_k_dense: 12, rerank_enabled: true, model: "qwen3:8b", dataset_id: "" } },
+      { id: "final-a", type: "default", position: { x: 660, y: 120 }, data: { label: "FinalAnswerNode", model: "qwen3:8b" } },
+      { id: "output-a", type: "default", position: { x: 920, y: 120 }, data: { label: "OutputNode" } },
+    ],
+    edges: [
+      { id: "e-a-1", source: "input-a", target: "executor-a" },
+      { id: "e-a-2", source: "executor-a", target: "final-a" },
+      { id: "e-a-3", source: "final-a", target: "output-a" },
+    ],
+  },
+  {
+    id: "plan-before-retrieve",
+    title: "Plan-Guided RAG",
+    mainIdea: "Create a plan first, then retrieve and answer.",
+    nodes: [
+      { id: "input-b", type: "default", position: { x: 80, y: 140 }, data: { label: "InputNode", query: "Ask your question here" } },
+      { id: "planner-b", type: "default", position: { x: 320, y: 140 }, data: { label: "PlannerNode", model: "qwen3:8b" } },
+      { id: "selector-b", type: "default", position: { x: 560, y: 140 }, data: { label: "ToolSelectorNode", strategy: "plan_first" } },
+      { id: "executor-b", type: "default", position: { x: 800, y: 140 }, data: { label: "ToolExecutorNode", final_k: 5, top_k_bm25: 10, top_k_dense: 10, rerank_enabled: true, model: "qwen3:8b", dataset_id: "" } },
+      { id: "final-b", type: "default", position: { x: 1040, y: 140 }, data: { label: "FinalAnswerNode", model: "qwen3:8b" } },
+      { id: "output-b", type: "default", position: { x: 1260, y: 140 }, data: { label: "OutputNode" } },
+    ],
+    edges: [
+      { id: "e-b-1", source: "input-b", target: "planner-b" },
+      { id: "e-b-2", source: "planner-b", target: "selector-b" },
+      { id: "e-b-3", source: "selector-b", target: "executor-b", label: "tool!=finish", ...( { condition: "tool!=finish" } as any ) },
+      { id: "e-b-4", source: "executor-b", target: "final-b" },
+      { id: "e-b-5", source: "final-b", target: "output-b" },
+    ],
+  },
+  {
+    id: "self-correcting-rag",
+    title: "Self-Correcting RAG",
+    mainIdea: "Retrieve, reflect on quality, retry if needed.",
+    nodes: [
+      { id: "input-c", type: "default", position: { x: 80, y: 120 }, data: { label: "InputNode", query: "Ask your question here" } },
+      { id: "planner-c", type: "default", position: { x: 320, y: 120 }, data: { label: "PlannerNode", model: "qwen3:8b" } },
+      { id: "selector-c", type: "default", position: { x: 560, y: 120 }, data: { label: "ToolSelectorNode", strategy: "plan_first" } },
+      { id: "executor-c", type: "default", position: { x: 800, y: 120 }, data: { label: "ToolExecutorNode", final_k: 8, top_k_bm25: 16, top_k_dense: 16, rerank_enabled: true, model: "qwen3:8b", dataset_id: "" } },
+      { id: "reflection-c", type: "default", position: { x: 560, y: 280 }, data: { label: "ReflectionNode", max_loops: 3, model: "qwen3:8b" } },
+      { id: "final-c", type: "default", position: { x: 800, y: 280 }, data: { label: "FinalAnswerNode", model: "qwen3:8b" } },
+      { id: "output-c", type: "default", position: { x: 1040, y: 280 }, data: { label: "OutputNode" } },
+    ],
+    edges: [
+      { id: "e-c-1", source: "input-c", target: "planner-c" },
+      { id: "e-c-2", source: "planner-c", target: "selector-c" },
+      { id: "e-c-3", source: "selector-c", target: "executor-c", label: "tool!=finish", ...( { condition: "tool!=finish" } as any ) },
+      { id: "e-c-4", source: "executor-c", target: "reflection-c" },
+      { id: "e-c-5", source: "reflection-c", target: "planner-c", label: "continue=true" },
+      { id: "e-c-6", source: "reflection-c", target: "final-c", label: "continue=false" },
+      { id: "e-c-7", source: "final-c", target: "output-c" },
+    ],
+  },
+];
+
 export default function WorkflowPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState(defaultNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(defaultEdges);
@@ -119,6 +204,7 @@ export default function WorkflowPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [datasetsLoading, setDatasetsLoading] = useState(false);
   const [datasetsError, setDatasetsError] = useState("");
+  const [agentSubgraphs, setAgentSubgraphs] = useState<Record<string, AgentSubgraphData>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -225,6 +311,16 @@ export default function WorkflowPage() {
     ]);
   }
 
+  function loadTemplate(template: WorkflowTemplate) {
+    setNodes(template.nodes.map((node) => ({ ...node, selected: false })));
+    setEdges(template.edges.map((edge) => ({ ...edge, selected: false, animated: false })));
+    setActiveEdgeIds([]);
+    setCurrentNodeId(null);
+    setStreamEvents([]);
+    setResult("");
+    setError("");
+  }
+
   function exportGraph() {
     const payload = {
       nodes: serializeNodes(nodes),
@@ -251,11 +347,176 @@ export default function WorkflowPage() {
       }));
       setNodes(nextNodes);
       setEdges(nextEdges);
+      const nextAgentSubgraphs: Record<string, AgentSubgraphData> = {};
+      for (const node of nextNodes) {
+        if (node.data?.label !== "AgentNode") continue;
+        const subgraph = (node.data as Record<string, unknown>)?.agent_subgraph;
+        if (subgraph && typeof subgraph === "object") {
+          nextAgentSubgraphs[node.id] = subgraph as AgentSubgraphData;
+        }
+      }
+      setAgentSubgraphs(nextAgentSubgraphs);
       setActiveEdgeIds([]);
       setError("");
     } catch {
       setError("Invalid workflow JSON");
     }
+  }
+
+  function expandAgentNode(agentId: string) {
+    const agentNode = nodes.find((node) => node.id === agentId);
+    if (!agentNode || nodeTypeFromLabel(agentNode.data?.label) !== "AgentNode") return;
+    const metadata =
+      agentSubgraphs[agentId] ?? buildDefaultAgentSubgraph(agentNode as Node);
+    const connectedIncoming: WorkflowEdge[] = edges
+      .filter((edge) => edge.target === agentId && edge.source !== agentId)
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: agentId,
+        condition: (edge as any).condition ? String((edge as any).condition) : undefined,
+      }));
+    const connectedOutgoing: WorkflowEdge[] = edges
+      .filter((edge) => edge.source === agentId && edge.target !== agentId)
+      .map((edge) => ({
+        id: edge.id,
+        source: agentId,
+        target: edge.target,
+        condition: (edge as any).condition ? String((edge as any).condition) : undefined,
+      }));
+    const effectiveMetadata: AgentSubgraphData = {
+      ...metadata,
+      incoming_edges: connectedIncoming.length ? connectedIncoming : metadata.incoming_edges,
+      outgoing_edges: connectedOutgoing.length ? connectedOutgoing : metadata.outgoing_edges,
+    };
+    const entryId = metadata.internal_nodes[0]?.id;
+    const exitId = metadata.internal_nodes[metadata.internal_nodes.length - 1]?.id;
+    if (!entryId || !exitId) return;
+
+    const internalNodes: Node[] = effectiveMetadata.internal_nodes.map((node) => ({
+      id: node.id,
+      type: "default",
+      position: node.position ?? { x: 0, y: 0 },
+      data: {
+        ...node.data,
+        label: node.type,
+        parent_agent_id: agentId,
+      },
+    }));
+    const internalEdges: Edge[] = effectiveMetadata.internal_edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.condition ?? undefined,
+      ...(edge.condition ? ({ condition: edge.condition } as any) : {}),
+    }));
+    const incomingEdges: Edge[] = effectiveMetadata.incoming_edges.map((edge) => ({
+      id: `${edge.id}__exp_${Date.now()}`,
+      source: edge.source,
+      target: entryId,
+      label: edge.condition ?? undefined,
+      ...(edge.condition ? ({ condition: edge.condition } as any) : {}),
+    }));
+    const outgoingEdges: Edge[] = effectiveMetadata.outgoing_edges.map((edge) => ({
+      id: `${edge.id}__exp_${Date.now()}_out`,
+      source: exitId,
+      target: edge.target,
+      label: edge.condition ?? undefined,
+      ...(edge.condition ? ({ condition: edge.condition } as any) : {}),
+    }));
+
+    setNodes((prev) => [...prev.filter((node) => node.id !== agentId), ...internalNodes]);
+    setEdges((prev) => [
+      ...prev.filter((edge) => edge.source !== agentId && edge.target !== agentId),
+      ...internalEdges,
+      ...incomingEdges,
+      ...outgoingEdges,
+    ]);
+    setAgentSubgraphs((prev) => ({ ...prev, [agentId]: effectiveMetadata }));
+  }
+
+  function collapseAgentNode(agentId: string) {
+    const metadata = agentSubgraphs[agentId];
+    if (!metadata) return;
+    const internalIds = new Set(metadata.internal_nodes.map((node) => node.id));
+    const entryId = metadata.internal_nodes[0]?.id;
+    const exitId = metadata.internal_nodes[metadata.internal_nodes.length - 1]?.id;
+    if (!entryId || !exitId) return;
+
+    const liveInternalNodes = nodes.filter((node) => internalIds.has(node.id));
+    const nextInternalNodes: WorkflowNode[] = liveInternalNodes.map((node) => ({
+      id: node.id,
+      type: nodeTypeFromLabel(node.data?.label) ?? "PlannerNode",
+      data: normalizeNodeData(node.data ?? {}, nodeTypeFromLabel(node.data?.label) ?? "PlannerNode"),
+      position: node.position,
+    }));
+    const liveEdges = edges;
+    const nextInternalEdges: WorkflowEdge[] = liveEdges
+      .filter((edge) => internalIds.has(edge.source) && internalIds.has(edge.target))
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        condition: (edge as any).condition ? String((edge as any).condition) : undefined,
+      }));
+    const nextIncoming: WorkflowEdge[] = liveEdges
+      .filter((edge) => edge.target === entryId && !internalIds.has(edge.source))
+      .map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: agentId,
+        condition: (edge as any).condition ? String((edge as any).condition) : undefined,
+      }));
+    const nextOutgoing: WorkflowEdge[] = liveEdges
+      .filter((edge) => edge.source === exitId && !internalIds.has(edge.target))
+      .map((edge) => ({
+        id: edge.id,
+        source: agentId,
+        target: edge.target,
+        condition: (edge as any).condition ? String((edge as any).condition) : undefined,
+      }));
+
+    const plannerNode = liveInternalNodes.find((node) => node.id === entryId);
+    const restoredAgentData: Record<string, unknown> = {
+      ...metadata.agent_data,
+      label: "AgentNode",
+      agent_subgraph: {
+        ...metadata,
+        internal_nodes: nextInternalNodes.length ? nextInternalNodes : metadata.internal_nodes,
+        internal_edges: nextInternalEdges.length ? nextInternalEdges : metadata.internal_edges,
+        incoming_edges: nextIncoming.length ? nextIncoming : metadata.incoming_edges,
+        outgoing_edges: nextOutgoing.length ? nextOutgoing : metadata.outgoing_edges,
+      },
+    };
+    const restoredAgentNode: Node = {
+      id: agentId,
+      type: "default",
+      position: plannerNode?.position ?? metadata.internal_nodes[0]?.position ?? { x: 120, y: 120 },
+      data: restoredAgentData,
+    };
+
+    setNodes((prev) => [...prev.filter((node) => !internalIds.has(node.id)), restoredAgentNode]);
+    setEdges((prev) => [
+      ...prev.filter((edge) => !internalIds.has(edge.source) && !internalIds.has(edge.target)),
+      ...nextIncoming.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: edge.condition ?? undefined,
+        ...(edge.condition ? ({ condition: edge.condition } as any) : {}),
+      })),
+      ...nextOutgoing.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: edge.condition ?? undefined,
+        ...(edge.condition ? ({ condition: edge.condition } as any) : {}),
+      })),
+    ]);
+    setAgentSubgraphs((prev) => ({
+      ...prev,
+      [agentId]: restoredAgentData.agent_subgraph as AgentSubgraphData,
+    }));
   }
 
   async function run() {
@@ -437,6 +698,22 @@ export default function WorkflowPage() {
           {running ? "Running..." : "Run Workflow"}
         </button>
       </div>
+      <div className="workflow-toolbar">
+        {workflowTemplates.map((template) => (
+          <button
+            key={template.id}
+            className="button secondary"
+            onClick={() => loadTemplate(template)}
+            title={template.mainIdea}
+          >
+            {template.title}
+          </button>
+        ))}
+      </div>
+      <p className="muted">
+        Template ideas:{" "}
+        {workflowTemplates.map((template) => `${template.title} - ${template.mainIdea}`).join(" | ")}
+      </p>
 
       <div className="workflow-stats muted">
         Nodes: Input {counts.InputNode} | Retriever {counts.RetrieverNode} | LLM {counts.LLMNode} |
@@ -568,6 +845,12 @@ export default function WorkflowPage() {
 
             {nodeTypeFromLabel(selectedNode.data?.label) === "AgentNode" && (
               <>
+                <button
+                  className="button secondary"
+                  onClick={() => expandAgentNode(selectedNode.id)}
+                >
+                  Expand Agent
+                </button>
                 <label>
                   Query (optional)
                   <textarea
@@ -632,6 +915,14 @@ export default function WorkflowPage() {
                   Enable web search tool
                 </label>
               </>
+            )}
+            {selectedNode.data?.parent_agent_id && (
+              <button
+                className="button secondary"
+                onClick={() => collapseAgentNode(String(selectedNode.data?.parent_agent_id))}
+              >
+                Collapse Agent
+              </button>
             )}
 
             {nodeTypeFromLabel(selectedNode.data?.label) === "PlannerNode" && (
@@ -928,13 +1219,17 @@ function normalizeNodeData(data: Record<string, unknown>, type: NodeTypeName): R
     return { template: String(data.template ?? "") };
   }
   if (type === "AgentNode") {
-    return {
+    const normalized: Record<string, unknown> = {
       query: String(data.query ?? ""),
       k: Number(data.k ?? 5),
       max_steps: Number(data.max_steps ?? 5),
       use_web_search: Boolean(data.use_web_search ?? false),
       model: String(data.model ?? "qwen3:8b"),
     };
+    if (data.agent_subgraph && typeof data.agent_subgraph === "object") {
+      normalized.agent_subgraph = data.agent_subgraph;
+    }
+    return normalized;
   }
   if (type === "PlannerNode") {
     return {
@@ -970,6 +1265,63 @@ function normalizeNodeData(data: Record<string, unknown>, type: NodeTypeName): R
     };
   }
   return {};
+}
+
+function buildDefaultAgentSubgraph(agentNode: Node): AgentSubgraphData {
+  const agentId = agentNode.id;
+  const x = agentNode.position.x;
+  const y = agentNode.position.y;
+  const internalNodes: WorkflowNode[] = [
+    {
+      id: `${agentId}__planner`,
+      type: "PlannerNode",
+      position: { x: x - 120, y: y - 60 },
+      data: { model: "qwen3:8b" },
+    },
+    {
+      id: `${agentId}__selector`,
+      type: "ToolSelectorNode",
+      position: { x: x + 120, y: y - 60 },
+      data: { strategy: "plan_first" },
+    },
+    {
+      id: `${agentId}__executor`,
+      type: "ToolExecutorNode",
+      position: { x: x + 360, y: y - 60 },
+      data: { final_k: 5, top_k_bm25: 8, top_k_dense: 8, rerank_enabled: true, model: "qwen3:8b" },
+    },
+    {
+      id: `${agentId}__reflection`,
+      type: "ReflectionNode",
+      position: { x: x + 120, y: y + 120 },
+      data: { max_loops: 3, model: "qwen3:8b" },
+    },
+    {
+      id: `${agentId}__final`,
+      type: "FinalAnswerNode",
+      position: { x: x + 360, y: y + 120 },
+      data: { model: "qwen3:8b" },
+    },
+  ];
+  const internalEdges: WorkflowEdge[] = [
+    { id: `${agentId}__e1`, source: `${agentId}__planner`, target: `${agentId}__selector` },
+    {
+      id: `${agentId}__e2`,
+      source: `${agentId}__selector`,
+      target: `${agentId}__executor`,
+      condition: "tool!=finish",
+    },
+    { id: `${agentId}__e3`, source: `${agentId}__executor`, target: `${agentId}__reflection` },
+    { id: `${agentId}__e4`, source: `${agentId}__reflection`, target: `${agentId}__planner` },
+    { id: `${agentId}__e5`, source: `${agentId}__reflection`, target: `${agentId}__final` },
+  ];
+  return {
+    agent_data: normalizeNodeData(agentNode.data as Record<string, unknown>, "AgentNode"),
+    internal_nodes: internalNodes,
+    internal_edges: internalEdges,
+    incoming_edges: [],
+    outgoing_edges: [],
+  };
 }
 
 function eventLabel(event: WorkflowRunStreamEvent): string {
