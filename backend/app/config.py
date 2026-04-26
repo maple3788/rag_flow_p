@@ -30,6 +30,14 @@ class Settings:
         "cross-encoder/ms-marco-MiniLM-L-6-v2",
     )
     reranker_model: str = os.getenv("RERANKER_MODEL", "qwen3:8b")
+    graphrag_enabled: bool = os.getenv("GRAPHRAG_ENABLED", "true").lower() == "true"
+    graphrag_entity_top_k: int = int(os.getenv("GRAPHRAG_ENTITY_TOP_K", "8"))
+    graphrag_relation_top_k: int = int(os.getenv("GRAPHRAG_RELATION_TOP_K", "16"))
+    graphrag_chunk_top_k: int = int(os.getenv("GRAPHRAG_CHUNK_TOP_K", "8"))
+    graphrag_extraction_model: str = os.getenv("GRAPHRAG_EXTRACTION_MODEL", "")
+    graphrag_extraction_timeout_seconds: int = int(
+        os.getenv("GRAPHRAG_EXTRACTION_TIMEOUT_SECONDS", "45")
+    )
 
 
 settings = Settings()

@@ -192,3 +192,105 @@ def ensure_schema_updates() -> None:
                 """
             )
         )
+        embedding_dim = int(settings.embedding_dimension)
+        connection.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS graph_entities (
+                    id SERIAL PRIMARY KEY,
+                    dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    entity_type VARCHAR(64) NOT NULL DEFAULT 'concept',
+                    description TEXT NOT NULL DEFAULT '',
+                    aliases JSON NOT NULL DEFAULT '{{}}'::json,
+                    metadata JSON NOT NULL DEFAULT '{{}}'::json,
+                    embedding vector({embedding_dim})
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_graph_entities_dataset_id
+                ON graph_entities (dataset_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_graph_entities_name
+                ON graph_entities (name)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS graph_relations (
+                    id SERIAL PRIMARY KEY,
+                    dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                    source_entity_id INTEGER NOT NULL REFERENCES graph_entities(id) ON DELETE CASCADE,
+                    target_entity_id INTEGER NOT NULL REFERENCES graph_entities(id) ON DELETE CASCADE,
+                    relation VARCHAR(128) NOT NULL DEFAULT 'related_to',
+                    weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+                    evidence_chunk_id INTEGER REFERENCES chunks(id) ON DELETE SET NULL,
+                    metadata JSON NOT NULL DEFAULT '{}'::json
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_graph_relations_dataset_id
+                ON graph_relations (dataset_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_graph_relations_source_entity_id
+                ON graph_relations (source_entity_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_graph_relations_target_entity_id
+                ON graph_relations (target_entity_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS chunk_entity_links (
+                    id SERIAL PRIMARY KEY,
+                    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+                    entity_id INTEGER NOT NULL REFERENCES graph_entities(id) ON DELETE CASCADE,
+                    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+                    metadata JSON NOT NULL DEFAULT '{}'::json
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_chunk_entity_links_chunk_id
+                ON chunk_entity_links (chunk_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_chunk_entity_links_entity_id
+                ON chunk_entity_links (entity_id)
+                """
+            )
+        )

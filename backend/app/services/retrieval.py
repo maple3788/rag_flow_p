@@ -7,6 +7,7 @@ from app.config import settings
 from app.services.bm25 import bm25_search, bm25_search_file_summaries
 from app.services.embeddings import embed_query
 from app.services.faiss_index import dense_search, dense_search_file_summaries
+from app.services.graph_retrieval import retrieve_graph_context
 from app.services.rrf import reciprocal_rank_fusion
 from app.services.reranker import rerank_fused_chunks
 
@@ -21,8 +22,21 @@ def retrieve_similar_chunks(
     fusion_method: str = "rrf",
     rerank_enabled: bool = True,
     rerank_model: str | None = None,
+    retrieval_mode: str = "hybrid",
 ) -> list[SourceChunk]:
     final_k = max(1, k)
+    mode = (retrieval_mode or "hybrid").strip().lower()
+    if dataset_id is not None and mode == "graph":
+        graph_sources = retrieve_graph_context(
+            db=db,
+            query=query,
+            dataset_id=dataset_id,
+            final_k=final_k,
+        )
+        if graph_sources:
+            return graph_sources
+        mode = "hybrid"
+
     query_embedding = embed_query(query)
 
     if dataset_id is not None:
@@ -37,6 +51,7 @@ def retrieve_similar_chunks(
             rerank_enabled=rerank_enabled,
             rerank_model=rerank_model,
             query_embedding=query_embedding,
+            retrieval_mode=mode,
         )
         if debug["final_sources"]:
             return debug["final_sources"]
@@ -78,8 +93,33 @@ def build_dataset_retrieval_debug(
     file_router_top_k: int = 8,
     summary_candidate_k: int | None = None,
     query_embedding: list[float] | None = None,
+    retrieval_mode: str = "hybrid",
 ) -> dict:
+    mode = (retrieval_mode or "hybrid").strip().lower()
     effective_embedding = query_embedding or embed_query(query)
+    graph_sources: list[SourceChunk] = []
+    if mode in {"graph", "hybrid_graph"}:
+        graph_sources = retrieve_graph_context(
+            db=db,
+            query=query,
+            dataset_id=dataset_id,
+            final_k=final_k,
+        )
+        if mode == "graph":
+            return {
+                "bm25_hits": [],
+                "dense_hits": [],
+                "fused_hits": [],
+                "summary_used": False,
+                "file_hits": [],
+                "summary_bm25_hits": [],
+                "summary_dense_hits": [],
+                "summary_fused_hits": [],
+                "summary_candidate_k": summary_candidate_k,
+                "reranked_sources": graph_sources,
+                "final_sources": graph_sources[:final_k],
+            }
+
     candidate_file_ids: list[int] = []
     summary_bm25_hits = []
     summary_dense_hits = []
@@ -176,6 +216,8 @@ def build_dataset_retrieval_debug(
         if rerank_enabled and fused_sources
         else fused_sources
     )
+    if mode == "hybrid_graph" and graph_sources:
+        reranked_sources = _merge_unique_sources(primary=graph_sources, secondary=reranked_sources)
     final_sources = reranked_sources[:final_k]
     return {
         "bm25_hits": bm25_hits,
@@ -190,6 +232,17 @@ def build_dataset_retrieval_debug(
         "reranked_sources": reranked_sources,
         "final_sources": final_sources,
     }
+
+
+def _merge_unique_sources(primary: list[SourceChunk], secondary: list[SourceChunk]) -> list[SourceChunk]:
+    merged: list[SourceChunk] = []
+    seen: set[int] = set()
+    for source in primary + secondary:
+        if source.chunk_id in seen:
+            continue
+        seen.add(source.chunk_id)
+        merged.append(source)
+    return merged
 
 
 def _fetch_sources_by_chunk_ids(

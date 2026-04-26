@@ -37,6 +37,7 @@ from app.services.document_parser import parse_uploaded_file
 from app.services.embeddings import embed_texts
 from app.services.evaluation import evaluate_rag_output
 from app.services.faiss_index import add_embeddings, add_file_summary_embedding
+from app.services.graph_build import build_graph_from_chunks
 from app.services.dataset_config import resolve_dataset_config
 from app.services.query_ops import rerank_sources, rewrite_query
 from app.services.retrieval import build_dataset_retrieval_debug, retrieve_similar_chunks
@@ -119,6 +120,11 @@ async def upload_document(
         embeddings=vectors,
         chunk_ids=[chunk.id for chunk in chunk_rows],
     )
+    build_graph_from_chunks(
+        db=db,
+        dataset_id=default_dataset.id,
+        chunks=chunk_rows,
+    )
     index_chunks(
         dataset_id=default_dataset.id,
         items=[
@@ -200,6 +206,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
             use_summary=effective_use_summary,
             file_router_top_k=summary_top_k,
             summary_candidate_k=summary_candidate_k,
+            retrieval_mode=request.retrieval_mode,
         )
         sources = pipeline["final_sources"]
         if not sources and retrieval_query != request.query:
@@ -217,6 +224,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
                 use_summary=effective_use_summary,
                 file_router_top_k=summary_top_k,
                 summary_candidate_k=summary_candidate_k,
+                retrieval_mode=request.retrieval_mode,
             )
             sources = pipeline["final_sources"]
         retrieval_debug = _to_chat_retrieval_debug(
@@ -237,6 +245,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
                 "summary_candidate_k": summary_candidate_k,
                 "rerank_enabled": bool(dataset_config["rerank_enabled"]),
                 "rerank_model": str(dataset_config["rerank_model"]),
+                "retrieval_mode": request.retrieval_mode,
             },
             pipeline=pipeline,
         )
@@ -251,6 +260,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
             fusion_method="rrf",
             rerank_enabled=bool(dataset_config["rerank_enabled"]),
             rerank_model=str(dataset_config["rerank_model"]),
+            retrieval_mode=request.retrieval_mode,
         )
     if request.enable_rerank and request.dataset_id is None:
         sources = rerank_sources(request.query, sources)
@@ -327,6 +337,7 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
             use_summary=effective_use_summary,
             file_router_top_k=summary_top_k,
             summary_candidate_k=summary_candidate_k,
+            retrieval_mode=request.retrieval_mode,
         )
         sources = pipeline["final_sources"]
         if not sources and retrieval_query != request.query:
@@ -344,6 +355,7 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
                 use_summary=effective_use_summary,
                 file_router_top_k=summary_top_k,
                 summary_candidate_k=summary_candidate_k,
+                retrieval_mode=request.retrieval_mode,
             )
             sources = pipeline["final_sources"]
         retrieval_debug = _to_chat_retrieval_debug(
@@ -364,6 +376,7 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
                 "summary_candidate_k": summary_candidate_k,
                 "rerank_enabled": bool(dataset_config["rerank_enabled"]),
                 "rerank_model": str(dataset_config["rerank_model"]),
+                "retrieval_mode": request.retrieval_mode,
             },
             pipeline=pipeline,
         )
@@ -378,6 +391,7 @@ def chat_stream(request: ChatRequest, db: Session = Depends(get_db)) -> Streamin
             fusion_method="rrf",
             rerank_enabled=bool(dataset_config["rerank_enabled"]),
             rerank_model=str(dataset_config["rerank_model"]),
+            retrieval_mode=request.retrieval_mode,
         )
     if request.enable_rerank and request.dataset_id is None:
         sources = rerank_sources(request.query, sources)
@@ -687,6 +701,11 @@ async def upload_dataset_file(
         embeddings=vectors,
         chunk_ids=[chunk.id for chunk in chunk_rows],
     )
+    build_graph_from_chunks(
+        db=db,
+        dataset_id=dataset.id,
+        chunks=chunk_rows,
+    )
     index_chunks(
         dataset_id=dataset.id,
         items=[
@@ -838,10 +857,12 @@ def debug_dataset_retrieval(
         use_summary=effective_use_summary,
         file_router_top_k=summary_top_k,
         summary_candidate_k=summary_candidate_k,
+        retrieval_mode=request.retrieval_mode,
     )
 
     debug_config = {
         **config,
+        "retrieval_mode": request.retrieval_mode,
         "use_summary": effective_use_summary,
         "use_summary_requested": requested_use_summary,
         "dataset_has_summary": dataset_has_summary,

@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     use_summary: bool | None = None
     summary_top_k: int | None = None
     summary_candidate_k: int | None = None
+    retrieval_mode: str = "hybrid"
 
 
 class EvaluationScores(BaseModel):
@@ -180,6 +181,7 @@ class RetrievalDebugRequest(BaseModel):
     summary_top_k: int | None = None
     summary_candidate_k: int | None = None
     model: str | None = None
+    retrieval_mode: str = "hybrid"
 
 
 class RetrievalDebugResponse(BaseModel):

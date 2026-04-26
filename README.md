@@ -52,6 +52,12 @@ Set:
 - `EMBEDDING_MODEL` (default `nomic-embed-text:latest`)
 - `CHAT_MODEL` (default `qwen3:8b`, alternate `llama3.2:latest`)
 - `EMBEDDING_DIMENSION` (default `768`)
+- `GRAPHRAG_ENABLED` (default `true`)
+- `GRAPHRAG_ENTITY_TOP_K` (default `8`)
+- `GRAPHRAG_RELATION_TOP_K` (default `16`)
+- `GRAPHRAG_CHUNK_TOP_K` (default `8`)
+- `GRAPHRAG_EXTRACTION_MODEL` (optional, defaults to `CHAT_MODEL` when empty)
+- `GRAPHRAG_EXTRACTION_TIMEOUT_SECONDS` (default `45`)
 
 Pull local Ollama models:
 
@@ -76,6 +82,9 @@ Backend endpoints:
 - `GET /api/evaluations?limit=20&conversation_id=...`
 - `GET /api/evaluations/summary?limit=200&conversation_id=...`
 - `POST /api/workflow/run` (`{"nodes":[...], "edges":[...]}`)
+
+GraphRAG retrieval option on chat endpoints:
+- `retrieval_mode`: `hybrid` (default), `graph`, or `hybrid_graph`
 
 ## Frontend Setup (Next.js)
 

@@ -71,6 +71,7 @@ class RetrieverTool(WorkflowTool):
         top_k_bm25 = _optional_int(self.node_data.get("top_k_bm25"))
         top_k_dense = _optional_int(self.node_data.get("top_k_dense"))
         rerank_enabled = bool(self.node_data.get("rerank_enabled", True))
+        retrieval_mode = str(self.node_data.get("retrieval_mode", "hybrid"))
         sources = retrieve_similar_chunks(
             db=context.db,
             query=args or context.last_query,
@@ -79,6 +80,7 @@ class RetrieverTool(WorkflowTool):
             top_k_bm25=top_k_bm25,
             top_k_dense=top_k_dense,
             rerank_enabled=rerank_enabled,
+            retrieval_mode=retrieval_mode,
         )
         context.last_sources = sources
         context.shared_state["latest_sources"] = [source.model_dump() for source in sources]
@@ -90,6 +92,7 @@ class RetrieverTool(WorkflowTool):
             "top_k_bm25": top_k_bm25,
             "top_k_dense": top_k_dense,
             "rerank_enabled": rerank_enabled,
+            "retrieval_mode": retrieval_mode,
             "output": [source.content for source in sources],
             "sources": [source.model_dump() for source in sources],
         }
@@ -177,7 +180,13 @@ class RetrieverNode(BaseWorkflowNode):
                 detail=f"RetrieverNode '{self.node.id}' did not receive query input",
             )
         k = int(self.node.data.get("k", 5))
-        sources = retrieve_similar_chunks(db=context.db, query=query, k=k)
+        retrieval_mode = str(self.node.data.get("retrieval_mode", "hybrid"))
+        sources = retrieve_similar_chunks(
+            db=context.db,
+            query=query,
+            k=k,
+            retrieval_mode=retrieval_mode,
+        )
         context.last_query = query
         context.last_sources = sources
         context.shared_state["latest_sources"] = [source.model_dump() for source in sources]
@@ -331,7 +340,13 @@ class AgentNode(BaseWorkflowNode):
 
             if action == "retrieve":
                 k = int(self.node.data.get("k", 5))
-                sources = retrieve_similar_chunks(db=context.db, query=action_input, k=k)
+                retrieval_mode = str(self.node.data.get("retrieval_mode", "hybrid"))
+                sources = retrieve_similar_chunks(
+                    db=context.db,
+                    query=action_input,
+                    k=k,
+                    retrieval_mode=retrieval_mode,
+                )
                 state["retrieved_sources"] = [source.model_dump() for source in sources]
                 state["tool_results"].append(
                     {
